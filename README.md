@@ -73,4 +73,4 @@ Enjoy seamless syncing! 🎉
 # License 
 
 A full copy of the license can be found in the github repo.
-Please note Turbosync is a signtory of the Pride Flag Covenant. 
+Please note Turbosync is a signtory of the 🏳️‍🌈 Pride Flag Covenant. 
