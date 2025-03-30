@@ -1,4 +1,4 @@
-@#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Build script for TurboSync macOS app
 """
@@ -7,9 +7,10 @@ import os
 import sys
 import shutil
 import subprocess
+import argparse
 
-def check_fswatch():
-    """Check if fswatch is installed, offer to install if not"""
+def check_fswatch(args):
+    """Check if fswatch is installed, offer to install if not (unless non-interactive)"""
     try:
         result = subprocess.run(
             ["which", "fswatch"],
@@ -17,27 +18,46 @@ def check_fswatch():
             text=True,
             check=False
         )
-        if result.returncode != 0:
+        fswatch_installed = result.returncode == 0
+
+        if not fswatch_installed:
             print("\nfswatch is not installed, but recommended for file watching features.")
-            response = input("Do you want to install fswatch using Homebrew? (y/n): ").strip().lower()
-            if response == 'y':
+            install_fswatch = args.install_fswatch
+            if not args.non_interactive:
+                response = input("Do you want to install fswatch using Homebrew? (y/n): ").strip().lower()
+                if response == 'y':
+                    install_fswatch = True
+                else:
+                    print("Skipping fswatch installation. File watching features will be disabled.")
+                    install_fswatch = False # Ensure it's false if user says no
+
+            if install_fswatch:
                 # Check if Homebrew is installed
                 try:
                     subprocess.run(["brew", "--version"], capture_output=True, check=True)
                     # Install fswatch
-                    print("Installing fswatch...")
+                    print("Attempting to install fswatch via Homebrew...")
                     subprocess.run(["brew", "install", "fswatch"], check=True)
                     print("fswatch installed successfully!")
+                    fswatch_installed = True # Update status
                 except (subprocess.SubprocessError, FileNotFoundError):
-                    print("Error: Homebrew is not installed. Please install Homebrew first:")
-                    print("  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"")
-                    print("Then run: brew install fswatch")
-            else:
-                print("Skipping fswatch installation. File watching features will be disabled.")
-        else:
-            print("fswatch is already installed. File watching features will be available.")
+                    print("Error: Homebrew is not installed or installation failed.")
+                    if args.non_interactive:
+                        print("Cannot install fswatch automatically in non-interactive mode without Homebrew.")
+                    else:
+                         print("Please install Homebrew first:")
+                         print("  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"")
+                         print("Then run: brew install fswatch")
+                    print("File watching features may be limited.")
+            # else: # Already handled skipping message above if interactive
+               # if args.non_interactive: # If non-interactive and not installing
+                   # print("Skipping fswatch installation as requested/default.")
+
+        if fswatch_installed:
+             print("fswatch is installed. File watching features will be available.")
+
     except Exception as e:
-        print(f"Error checking fswatch: {str(e)}")
+        print(f"Error checking/installing fswatch: {str(e)}")
 
 def ensure_icon_exists():
     """Ensure the icon exists for the app"""
@@ -121,17 +141,17 @@ def ensure_icon_exists():
     
     return icon_path, icns_path
 
-def build_app():
+def build_app(args):
     """Build the macOS app using PyInstaller"""
     print("Building TurboSync macOS app...")
     
     # Ensure we're in the right directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
-    
-    # Check if fswatch is installed
-    check_fswatch()
-    
+
+    # Check if fswatch is installed (pass args)
+    check_fswatch(args)
+
     # Make sure dependencies are installed
     subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
     
@@ -222,31 +242,59 @@ app = BUNDLE(
         f.write(spec_content)
     
     # Use PyInstaller with the spec file
-    subprocess.run(["pyinstaller", spec_file], check=True)
-    
+    pyinstaller_command = ["pyinstaller", spec_file]
+    if args.non_interactive:
+        pyinstaller_command.append("--noconfirm") # Add noconfirm flag if non-interactive
+    subprocess.run(pyinstaller_command, check=True)
+
     # Removed redundant copy of .env to dist folder
     
     print("Build complete!")
     print(f"App is located at: {os.path.join(script_dir, 'dist', 'TurboSync.app')}")
-    
-    # Move app to Applications folder if requested
-    response = input("Do you want to install TurboSync.app to your Applications folder? (y/n): ").strip().lower()
-    if response == 'y':
-        app_path = os.path.join(script_dir, "dist", "TurboSync.app")
-        applications_path = "/Applications/TurboSync.app"
-        
-        # Remove existing app if it exists
-        if os.path.exists(applications_path):
-            shutil.rmtree(applications_path)
-        
-        # Copy the app
-        shutil.copytree(app_path, applications_path)
-        print(f"TurboSync app installed to {applications_path}")
-        
-        # Ask to launch the app
-        response = input("Do you want to launch TurboSync now? (y/n): ").strip().lower()
-        if response == 'y':
-            subprocess.run(["open", applications_path])
+
+    # Install and launch only if interactive and requested
+    if not args.non_interactive:
+        # Move app to Applications folder if requested
+        install_response = input("Do you want to install TurboSync.app to your Applications folder? (y/n): ").strip().lower()
+        if install_response == 'y':
+            app_path = os.path.join(script_dir, "dist", "TurboSync.app")
+            applications_path = "/Applications/TurboSync.app"
+
+            # Remove existing app if it exists
+            if os.path.exists(applications_path):
+                print(f"Removing existing app at {applications_path}...")
+                shutil.rmtree(applications_path)
+
+            # Copy the app
+            print(f"Installing app to {applications_path}...")
+            shutil.copytree(app_path, applications_path)
+            print(f"TurboSync app installed to {applications_path}")
+
+            # Ask to launch the app
+            launch_response = input("Do you want to launch TurboSync now? (y/n): ").strip().lower()
+            if launch_response == 'y':
+                print("Launching TurboSync...")
+                subprocess.run(["open", applications_path])
+    else:
+        print("Skipping installation and launch prompts in non-interactive mode.")
+
 
 if __name__ == "__main__":
-    build_app()
+    parser = argparse.ArgumentParser(description="Build the TurboSync macOS app.")
+    parser.add_argument(
+        '--non-interactive',
+        action='store_true',
+        help='Run in non-interactive mode, suppressing prompts and using defaults or flags.'
+    )
+    parser.add_argument(
+        '--install-fswatch',
+        action='store_true',
+        help='Attempt to install fswatch using Homebrew if not found (requires Homebrew). Only effective in non-interactive mode if Homebrew is present.'
+    )
+    # Add flags for install/launch if needed for non-interactive local use,
+    # but typically not desired for CI.
+    # parser.add_argument('--install-app', action='store_true', help='Install app to /Applications (non-interactive).')
+    # parser.add_argument('--launch-app', action='store_true', help='Launch app after build (non-interactive).')
+
+    args = parser.parse_args()
+    build_app(args)

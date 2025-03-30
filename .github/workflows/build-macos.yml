@@ -31,7 +31,7 @@ jobs:
           pip install py2app
 
       - name: Run build script
-        run: python build_app.py # Execute your build script
+        run: python build_app.py --non-interactive --install-fswatch # Execute build script non-interactively
 
       - name: Upload macOS App Artifact
         uses: actions/upload-artifact@v4

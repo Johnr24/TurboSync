@@ -8,8 +8,8 @@ a = Analysis(
     pathex=['/Users/john/Documents/TurboSync'],
     binaries=[],
     datas=[
-        ('/Users/john/Documents/TurboSync/dist/.env.template', '.'), # Bundle the template instead of .env
-        ('/Users/john/Documents/TurboSync/turbo_sync/icon.png', '.'),                                        # Include icon.png in the root
+        ('/Users/john/Documents/TurboSync/turbo_sync/.env.template', '.'), # Bundle the template from turbo_sync/
+        ('/Users/john/Documents/TurboSync/turbo_sync/icon.png', '.'),                                               # Include icon.png in the root
     ],
     hiddenimports=['plistlib'],
     hookspath=[],
