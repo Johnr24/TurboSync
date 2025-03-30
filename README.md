@@ -68,3 +68,9 @@ It also features optional real-time local file watching using `fswatch` to trigg
 4.  Use the menubar icon to check status, sync manually, or toggle file watching.
 
 Enjoy seamless syncing! 🎉
+
+
+# License 
+
+A full copy of the license can be found in the github repo.
+Please note Turbosync is a signtory of the Pride Flag Covenant. 
