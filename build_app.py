@@ -152,11 +152,10 @@ a = Analysis(
     pathex=['{script_dir}'],
     binaries=[],
     datas=[
-        ('{os.path.join(script_dir, ".env")}', '.'),
-        ('{icon_path}', '.'),
-        ('{icon_path}', 'turbo_sync'),
+        ('{os.path.join(script_dir, ".env")}', '.'), # Include .env in the root
+        ('{icon_path}', '.'),                     # Include icon.png in the root
     ],
-    hiddenimports=['PIL._tkinter_finder', 'plistlib'],
+    hiddenimports=['plistlib'], # Removed PIL._tkinter_finder
     hookspath=[],
     hooksconfig={{}},
     runtime_hooks=[],
@@ -179,7 +178,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=False, # Reverted back to False for menubar app
     disable_windowed_traceback=False,
     argv_emulation=True,
     target_arch='arm64',
@@ -211,7 +210,7 @@ app = BUNDLE(
         'CFBundleVersion': '1.0.0',
         'CFBundleShortVersionString': '1.0.0',
         'NSHighResolutionCapable': True,
-        'LSUIElement': True,  # Makes the app appear only in the menubar
+        'LSUIElement': True,  # Uncommented for menubar app
         'LSBackgroundOnly': False,
     }},
 )
@@ -225,10 +224,7 @@ app = BUNDLE(
     # Use PyInstaller with the spec file
     subprocess.run(["pyinstaller", spec_file], check=True)
     
-    # Copy the .env file to the dist directory if it exists
-    env_path = os.path.join(script_dir, ".env")
-    if os.path.exists(env_path):
-        shutil.copy(env_path, os.path.join(script_dir, "dist"))
+    # Removed redundant copy of .env to dist folder
     
     print("Build complete!")
     print(f"App is located at: {os.path.join(script_dir, 'dist', 'TurboSync.app')}")
@@ -253,4 +249,4 @@ app = BUNDLE(
             subprocess.run(["open", applications_path])
 
 if __name__ == "__main__":
-    build_app() 
+    build_app()

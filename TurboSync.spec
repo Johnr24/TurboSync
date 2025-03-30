@@ -8,11 +8,10 @@ a = Analysis(
     pathex=['/Users/john/Documents/TurboSync'],
     binaries=[],
     datas=[
-        ('/Users/john/Documents/TurboSync/.env', '.'),
-        ('/Users/john/Documents/TurboSync/turbo_sync/icon.png', '.'),
-        ('/Users/john/Documents/TurboSync/turbo_sync/icon.png', 'turbo_sync'),
+        ('/Users/john/Documents/TurboSync/.env', '.'), # Include .env in the root
+        ('/Users/john/Documents/TurboSync/turbo_sync/icon.png', '.'),                     # Include icon.png in the root
     ],
-    hiddenimports=['PIL._tkinter_finder', 'plistlib'],
+    hiddenimports=['plistlib'], # Removed PIL._tkinter_finder
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -35,7 +34,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=False, # Reverted back to False for menubar app
     disable_windowed_traceback=False,
     argv_emulation=True,
     target_arch='arm64',
@@ -67,7 +66,7 @@ app = BUNDLE(
         'CFBundleVersion': '1.0.0',
         'CFBundleShortVersionString': '1.0.0',
         'NSHighResolutionCapable': True,
-        'LSUIElement': True,  # Makes the app appear only in the menubar
+        'LSUIElement': True,  # Uncommented for menubar app
         'LSBackgroundOnly': False,
     },
 )

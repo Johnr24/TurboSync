@@ -6,17 +6,24 @@ import logging
 import rumps
 import schedule
 from dotenv import load_dotenv
-from .sync import perform_sync, load_config
-from .watcher import FileWatcher, is_fswatch_available, get_fswatch_config
+from turbo_sync.sync import perform_sync, load_config # Absolute import
+from turbo_sync.watcher import FileWatcher, is_fswatch_available, get_fswatch_config # Absolute import
+from turbo_sync.utils import get_resource_path # Import from utils
 
 class TurboSyncMenuBar(rumps.App):
     def __init__(self):
         logging.info("Initializing TurboSyncMenuBar")
         
-        # Determine the icon path based on environment
-        icon_path = self.find_icon()
-        
-        # Initialize the app with the icon if found
+        # Determine the icon path using the helper function
+        icon_path = get_resource_path("icon.png")
+        if not icon_path or not os.path.exists(icon_path):
+             logging.error(f"Icon not found at expected path: {icon_path}. Trying fallback.")
+             # Attempt to create a fallback icon if the primary one is missing
+             icon_path = self.create_fallback_icon()
+             if not icon_path:
+                 logging.error("Fallback icon creation failed. Using default rumps icon.")
+
+        # Initialize the app with the icon if found/created
         try:
             logging.info(f"Initializing rumps.App with icon_path: {icon_path}")
             super(TurboSyncMenuBar, self).__init__(
@@ -69,77 +76,34 @@ class TurboSyncMenuBar(rumps.App):
                 sound=True
             )
             self.status_item.title = f"Status: Configuration Error"
-    
-    def find_icon(self):
-        """Find the icon file in various possible locations"""
-        # Look in several possible locations for the icon
-        possible_paths = [
-            # Standard development locations
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png"),
-            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "turbo_sync", "icon.png"),
-            
-            # PyInstaller bundle locations
-            os.path.join(sys._MEIPASS, "icon.png") if hasattr(sys, "_MEIPASS") else None,
-            os.path.join(sys._MEIPASS, "turbo_sync", "icon.png") if hasattr(sys, "_MEIPASS") else None,
-            
-            # Application bundle locations on macOS
-            "/Applications/TurboSync.app/Contents/Resources/icon.png",
-            os.path.join(os.path.dirname(sys.executable), "..", "Resources", "icon.png"),
-            
-            # Well-known backup location
-            os.path.join(os.path.expanduser("~/Library/Logs/TurboSync"), "icon.png"),
-        ]
-        
-        # Try to find additional paths based on the running executable
-        executable_dir = os.path.dirname(sys.executable)
-        package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        
-        # Add more potential paths
-        possible_paths.extend([
-            os.path.join(executable_dir, "icon.png"),
-            os.path.join(executable_dir, "..", "Resources", "icon.png"),
-            os.path.join(executable_dir, "..", "Resources", "base_library.zip", "turbo_sync", "icon.png"),
-            os.path.join(package_dir, "dist", "TurboSync.app", "Contents", "Resources", "icon.png"),
-        ])
-        
-        # Log all the paths we're checking
-        logging.debug(f"Searching for icon in the following locations:")
-        for idx, path in enumerate(possible_paths):
-            if path:
-                exists = os.path.exists(path)
-                logging.debug(f"  [{idx}] {path} {'EXISTS' if exists else 'NOT FOUND'}")
-        
-        # Use the first path that exists
-        for path in possible_paths:
-            if path and os.path.exists(path):
-                logging.info(f"Using icon from: {path}")
-                return path
-        
-        logging.warning("No icon found in any of the possible locations")
-        
-        # If no icon is found, create one on the fly
+
+    def create_fallback_icon(self):
+        """Creates a simple fallback icon if the main one is missing."""
+        logging.warning("Attempting to create a fallback icon.")
+        # Use a temporary directory for the fallback icon
+        temp_icon_path = os.path.join(os.path.expanduser("~/Library/Logs/TurboSync"), "fallback_icon.png")
         try:
-            temp_icon_path = os.path.join(os.path.expanduser("~/Library/Logs/TurboSync"), "temp_icon.png")
             os.makedirs(os.path.dirname(temp_icon_path), exist_ok=True)
-            
-            # Try to create a simple icon using PIL
-            from PIL import Image, ImageDraw
-            
-            # Create a smaller 64x64 image for the menubar
-            img = Image.new('RGBA', (64, 64), color=(0, 0, 0, 0))
-            draw = ImageDraw.Draw(img)
-            
-            # Draw a simple colored circle
-            draw.ellipse([(4, 4), (60, 60)], fill=(0, 120, 255))
-            draw.ellipse([(16, 16), (48, 48)], fill=(255, 255, 255))
-            
-            img.save(temp_icon_path)
-            logging.info(f"Created temporary icon at {temp_icon_path}")
-            return temp_icon_path
+            # Try to create a simple icon using PIL if available
+            # Check if PIL is available
+            try:
+                from PIL import Image, ImageDraw
+                # Create a smaller 64x64 image for the menubar
+                img = Image.new('RGBA', (64, 64), color=(0, 0, 0, 0))
+                draw = ImageDraw.Draw(img)
+                # Draw a simple colored circle (e.g., blue with white center)
+                draw.ellipse([(4, 4), (60, 60)], fill=(0, 120, 255, 255)) # Blue outer
+                draw.ellipse([(16, 16), (48, 48)], fill=(255, 255, 255, 255)) # White inner
+                img.save(temp_icon_path)
+                logging.info(f"Created fallback icon using PIL at {temp_icon_path}")
+                return temp_icon_path
+            except ImportError:
+                logging.error("PIL not found, cannot create fallback icon.")
+                return None
         except Exception as e:
-            logging.error(f"Failed to create temporary icon: {e}")
+            logging.error(f"Failed to create fallback icon: {e}")
             return None
-    
+
     def setup_file_watcher(self):
         """Set up the file watcher based on config"""
         logging.debug("Setting up file watcher")
@@ -347,11 +311,12 @@ class TurboSyncMenuBar(rumps.App):
     @rumps.clicked("Settings")
     def open_settings(self, _):
         logging.debug("Settings clicked")
-        # Open the .env file with the default text editor
-        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-        if os.path.exists(env_path):
+        # Use get_resource_path to find the .env file correctly
+        env_path = get_resource_path(".env")
+        if env_path and os.path.exists(env_path):
             logging.info(f"Opening settings file at: {env_path}")
-            os.system(f"open {env_path}")
+            # Use 'open -t' to open in the default text editor
+            os.system(f"open -t \"{env_path}\"")
         else:
             logging.warning(f"Settings file not found at: {env_path}")
     
