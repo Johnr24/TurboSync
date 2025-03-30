@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+@#!/usr/bin/env python3
 """
 Build script for TurboSync macOS app
 """
@@ -152,8 +152,8 @@ a = Analysis(
     pathex=['{script_dir}'],
     binaries=[],
     datas=[
-        ('{os.path.join(script_dir, ".env.template")}', '.'), # Bundle the template instead of .env (assuming it's at root)
-        ('{icon_path}', '.'),                                 # Include icon.png in the root
+        ('{os.path.join(script_dir, "turbo_sync", ".env.template")}', '.'), # Bundle the template from turbo_sync/
+        ('{icon_path}', '.'),                                               # Include icon.png in the root
     ],
     hiddenimports=['plistlib'],
     hookspath=[],
