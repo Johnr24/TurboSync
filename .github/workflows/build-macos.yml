@@ -63,10 +63,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/') # Only run for tags
         run: |
           echo "Zipping ${{ steps.vars.outputs.APP_PATH }} into ${{ steps.vars.outputs.ZIP_NAME }}"
-          # Ensure we are in the correct directory to zip relative paths correctly
-          cd dist
-          zip -r "../${{ steps.vars.outputs.ZIP_NAME }}" "${{ steps.vars.outputs.APP_NAME }}.app"
-          cd ..
+          # Zip using the relative path from the workspace root
+          zip -r "${{ steps.vars.outputs.ZIP_NAME }}" "${{ steps.vars.outputs.APP_PATH }}"
           echo "Zip created: ${{ steps.vars.outputs.ZIP_NAME }}"
           ls -l ${{ steps.vars.outputs.ZIP_NAME }}
 
