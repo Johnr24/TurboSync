@@ -22,7 +22,12 @@ It also features optional real-time local file watching using `fswatch` to trigg
 *   Locally mounted path for your remote server's file system (which can be local files or SMB/NFS share mounted in `/Volumes/`).
 *   `fswatch` (Optional, for file watching: `brew install fswatch`)
 
+## This repo should not be confused with sibiling project "TurboSort" 👀
+<p align="center"><img src="readme/image.png" alt="The image depicts a David Mitchell from that Mitchell and Web Look, in the get me hennimore sketch, in a suit holding two signs one says Turbosync, Not TurboSort the other says, Turbo Sort not Turbo Sync, David is sitting down across from a table, a medium wide shot. set against an office background." width="512"></p>
 
+Turbosort can be found here and is designed to work in tadem with colourstream or any S3 Server as a one way file moving operation. 
+
+TurboSort can be found here - https://github.com/johnr24/TurboSort
 
 ## Quick Install & Setup 🛠️
 

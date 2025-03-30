@@ -21,10 +21,16 @@ jobs:
         with:
           python-version: '3.x' # Use a recent Python 3 version
 
-      - name: Install dependencies
+      - name: Install fswatch (system dependency)
+        run: brew install fswatch
+
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      - name: Prepare .env file
+        run: cp dist/.env.template .env # Copy template to .env
 
       - name: Build the application
         run: python build_app.py # Assuming this script creates the .app bundle
