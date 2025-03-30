@@ -1,159 +1,70 @@
-# TurboSync
+# TurboSync 🚀
 
-A macOS menubar application that automatically syncs files between your local machine and a remote server based on `.livework` file markers.
+![the turbo link icon which is a gay pride flag with the letter T in the middle of it, the icon has rounded corners much like any other app icon](turbo_sync/icon.png)
 
-## Features
+A macOS menubar app that keeps local folders in sync with specific directories on a remote server. It looks for `.livework` files on the remote (via a mounted volume) and uses `rclone bisync` to synchronize those directories.
 
-- Automatically detects directories with `.livework` files on the remote server
-- Syncs those directories to your local machine using rsync
-- **Real-time file watching**: Automatically syncs when local files change
-- Configurable sync interval (default: every 5 minutes)
-- Runs in the macOS menubar for easy access
-- Provides notifications of sync status
-- All configuration in a simple .env file - no command line arguments needed
+It also features optional real-time local file watching using `fswatch` to trigger immediate syncs when you save changes! 💾➡️☁️
 
-## Requirements
+## Key Features ✨
 
-- macOS (10.14 or later recommended)
-- Python 3.7 or higher
-- rsync (pre-installed on macOS)
-- fswatch (optional, for file watching feature: `brew install fswatch`)
-- SSH access to your remote server
+*   Automatic discovery of remote directories marked with `.livework`.
+*   Bidirectional sync using `rclone bisync` (requires the remote path to be mounted locally).
+*   Real-time sync on local changes (optional, requires `fswatch`).
+*   Simple menubar interface for status and manual control.
+*   Configuration via a `.env` file.
 
-## Installation
+## Requirements 📋
 
-### Option 1: From Source
-
-1. Clone this repository:
-   ```
-   git clone https://github.com/johnr24/TurboSync.git
-   cd TurboSync
-   ```
-
-2. Install the required dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-
-3. Install fswatch (optional, for file watching):
-   ```
-   brew install fswatch
-   ```
-4. fill in the .env file with your remote server details
+*   macOS
+*   Python 3.7+
+*   `rclone` (Install: `brew install rclone`)
+*   Locally mounted path for your remote server's file system (which can be local files or SMB/NFS share mounted in `/Volumes/`).
+*   `fswatch` (Optional, for file watching: `brew install fswatch`)
 
 
-4. Build the macOS app:
-   ```
-   python build_app.py
-   ```
-   
-   This will create a standalone macOS app in the `dist` directory and offer to install it to your Applications folder.
 
-### Option 2: Manual Installation
+## Quick Install & Setup 🛠️
 
-1. Download the latest release from the [Releases](https://github.com/yourusername/TurboSync/releases) page
-2. Move `TurboSync.app` to your Applications folder
-3. Open the app - it will create a default configuration file if one doesn't exist
+1.  **Clone:**
+    ```bash
+    git clone https://github.com/johnr24/TurboSync.git
+    cd TurboSync
+    ```
 
-## Configuration
+2.  **Install Tools:**
+    ```bash
+    brew install rclone fswatch
+    ```
+    *(Skip `fswatch` if you don't need real-time local sync)*
 
-TurboSync uses a `.env` file for all configuration. When you first run the app, it will create a default `.env` file and open it for editing.
+3.  **Install Python Deps:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-### Configuration Options
+4.  **Configure:**
+    *   Copy the template: `cp dist/.env.template .env`
+    *   Edit `.env` and **carefully set `MOUNTED_VOLUME_PATH`** to the local path where your remote directory is mounted. Fill in other details like `REMOTE_USER`, `REMOTE_HOST`, `LOCAL_DIR`.
 
-```
-# Remote server configuration
-REMOTE_USER=username
-REMOTE_HOST=example.com
-REMOTE_PORT=22
-REMOTE_DIR=/path/to/remote/directory
+5.  **Build the App:**
+    ```bash
+    python build_app.py
+    ```
+    *   This creates `TurboSync.app` in the `dist/` folder. Move it to `/Applications` if desired.
 
-# Local directory to sync to
-LOCAL_DIR=/path/to/local/directory
+6.  **Run:** Launch `TurboSync.app`. Check the menubar icon!
 
-# Sync interval in minutes
-SYNC_INTERVAL=5
+## Basic Usage 🖱️
 
-# Watch local files for changes
-WATCH_LOCAL_FILES=true
-WATCH_DELAY_SECONDS=2
+1.  Ensure your remote volume is mounted locally at the path specified in `MOUNTED_VOLUME_PATH`.
+2.  On the remote server (via the mounted path), create an empty `.livework` file inside any directory within the remote file structure you want TurboSync to manage.
 
-# Rsync options
-RSYNC_OPTIONS=-avz --delete --exclude=".*" --exclude="node_modules"
-RSYNC_SSH_OPTIONS=-p ${REMOTE_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
-```
+    ```bash
+    # Example on the mounted volume
+    touch /Volumes/YourMount/path/to/project/.livework
+    ```
+3.  Run TurboSync. It will find the marked directories and start syncing them with corresponding folders in your `LOCAL_DIR`.
+4.  Use the menubar icon to check status, sync manually, or toggle file watching.
 
-### Required Options
-
-- `REMOTE_USER`: Your username on the remote server
-- `REMOTE_HOST`: The hostname or IP address of the remote server
-- `REMOTE_DIR`: The base directory on the remote server to scan for `.livework` files
-- `LOCAL_DIR`: The local directory where files will be synced to
-
-### Optional Options
-
-- `REMOTE_PORT`: SSH port (default: 22)
-- `SYNC_INTERVAL`: How often to sync in minutes (default: 5)
-- `WATCH_LOCAL_FILES`: Enable or disable file watching (default: true)
-- `WATCH_DELAY_SECONDS`: Delay between detecting changes and syncing, to prevent rapid syncs (default: 2)
-- `RSYNC_OPTIONS`: Options to pass to rsync (default: `-avz --delete --exclude=".*" --exclude="node_modules"`)
-- `RSYNC_SSH_OPTIONS`: Additional SSH options for rsync
-
-## Usage
-
-### Setting Up Remote Directories
-
-1. On your remote server, create a `.livework` file in any directory you want to sync:
-   ```
-   touch /path/to/your/project/.livework
-   ```
-
-2. TurboSync will automatically detect and sync this directory and all its contents.
-
-### Using the App
-
-- TurboSync runs in your menubar with a sync icon
-- Click the icon to access the menu
-- Use "Sync Now" to manually trigger a sync
-- Toggle "Enable File Watching" to turn automatic syncing on file changes on/off
-- "View Logs" shows the log file for troubleshooting
-- "Settings" opens the .env configuration file
-
-## Advanced Usage
-
-### File Watching
-
-When file watching is enabled, TurboSync will monitor your local directory for changes and automatically sync when files are modified. This provides real-time bidirectional sync:
-
-1. Remote to local: Happens on the schedule defined by `SYNC_INTERVAL`
-2. Local to remote: Happens immediately when local files change
-
-You can enable/disable file watching through the menu or the config file. If fswatch is not installed, TurboSync will notify you and disable the feature.
-
-### Customizing Sync Options
-
-You can customize the rsync options in your `.env` file:
-
-```
-RSYNC_OPTIONS=-avz --delete --exclude=".*" --exclude="node_modules" --exclude="*.log"
-```
-
-### Using SSH Keys
-
-TurboSync uses your system's SSH configuration. Set up SSH keys for passwordless authentication:
-
-```
-ssh-copy-id username@remote-server
-```
-
-## Troubleshooting
-
-- Check the log file through the "View Logs" menu option
-- Ensure your SSH connection works correctly by testing: `ssh username@remote-server`
-- Verify the remote directory path is correct
-- Check that you have the necessary permissions on both local and remote directories
-- If file watching isn't working, ensure fswatch is installed: `brew install fswatch`
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+Enjoy seamless syncing! 🎉

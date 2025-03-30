@@ -1,4 +1,21 @@
+# Environment variables
 .env
-dist
-build
-.venv
+*.env.*
+!*.env.template
+
+# Build artifacts
+dist/
+build/
+*.spec
+
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# macOS specific files
+.DS_Store
