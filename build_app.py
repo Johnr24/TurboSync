@@ -152,8 +152,8 @@ a = Analysis(
     pathex=['{script_dir}'],
     binaries=[],
     datas=[
-        ('{os.path.join(script_dir, "dist", ".env.template")}', '.'), # Bundle the template instead of .env
-        ('{icon_path}', '.'),                                        # Include icon.png in the root
+        ('{os.path.join(script_dir, ".env.template")}', '.'), # Bundle the template instead of .env (assuming it's at root)
+        ('{icon_path}', '.'),                                 # Include icon.png in the root
     ],
     hiddenimports=['plistlib'],
     hookspath=[],
