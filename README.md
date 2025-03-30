@@ -31,6 +31,15 @@ TurboSort can be found here - https://github.com/johnr24/TurboSort
 
 ## Quick Install & Setup 🛠️
 
+## Brew Install! 🍻
+
+```
+brew tap johnr24/turbosync
+brew install turbosync
+```
+
+
+## Manual Install 
 1.  **Clone:**
     ```bash
     git clone https://github.com/johnr24/TurboSync.git
