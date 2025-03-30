@@ -273,6 +273,9 @@ def sync_directory(remote_path, local_base_dir, config):
         f"{local_path}/"
     ] + rclone_opts_list # Add options from config, excluding --bidir
 
+    # Ensure empty source directories are created on the destination
+    rclone_cmd.append('--create-empty-src-dirs')
+
     # Add common filters (bisync also respects filters)
     # Using /.** to specifically exclude hidden files/dirs in the *root* of the sync path.
     # For node_modules, keep the original exclude.

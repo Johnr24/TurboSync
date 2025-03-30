@@ -1,4 +1,4 @@
-# TurboSync 🚀
+# TurboSync 🏳️‍🌈🚀🏳️‍⚧️
 
 <p align="center"><img src="turbo_sync/icon.png" alt="the turbo link icon which is a gay pride flag with the letter T in the middle of it, the icon has rounded corners much like any other app icon" width="128"></p>
 
