@@ -37,8 +37,11 @@ TurboSort can be found here - https://github.com/johnr24/TurboSort
 brew tap johnr24/turbosync
 brew install turbosync
 ```
-
-
+once that's done you can then do 
+```
+  ln -sfn "/opt/homebrew/opt/turbosync/TurboSync.app" /Applications/TurboSync.app
+```
+To link it to your app folder! 
 ## Manual Install 
 1.  **Clone:**
     ```bash
