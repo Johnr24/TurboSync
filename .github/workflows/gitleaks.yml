@@ -2,9 +2,10 @@ name: Gitleaks Scan
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main ] # Or your default branch
   pull_request:
-    branches: [ main ]
+    branches: [ main ] # Or your default branch
+  workflow_dispatch: # Allow manual triggering
 
 jobs:
   scan:
@@ -14,11 +15,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Fetch all history for Gitleaks
+          fetch-depth: 0 # Fetches all history for deep scan
 
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           # If you have a Gitleaks config file, uncomment the following line
-          # GITLEAKS_CONFIG: .gitleaks.toml
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Gitleaks uses this to report findings
+          # GITLEAKS_CONFIG_PATH: .gitleaks.toml
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Optional: For reporting findings back to GitHub Security tab

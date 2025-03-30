@@ -65,17 +65,29 @@ def setup_logging():
     
     return log_file
 
+import shutil # Add shutil for file copying
+
+# Define user-specific config path
+APP_NAME = "TurboSync"
+USER_CONFIG_DIR = os.path.expanduser(f'~/Library/Application Support/{APP_NAME}')
+USER_ENV_PATH = os.path.join(USER_CONFIG_DIR, '.env')
+
 # Removed get_resource_path function (moved to utils.py)
 
 def ensure_env_file():
-    """Ensure the .env file exists, create it if it doesn't"""
-    logging.debug("Checking for .env file")
-    env_path = get_resource_path(".env")
-    
-    if not os.path.exists(env_path):
-        logging.info(f".env file not found at {env_path}, creating default")
-        # Copy the template .env file or create a new one
-        template_content = """# Remote server configuration
+    """Ensure the .env file exists in the user config dir, create it from template if it doesn't"""
+    logging.debug(f"Checking for user .env file at {USER_ENV_PATH}")
+    os.makedirs(USER_CONFIG_DIR, exist_ok=True) # Ensure the directory exists
+
+    if not os.path.exists(USER_ENV_PATH):
+        logging.info(f"User .env file not found at {USER_ENV_PATH}, creating from template.")
+        try:
+            # Find the bundled template file
+            template_path = get_resource_path(".env.template")
+            if not os.path.exists(template_path):
+                 logging.error(f"Bundled .env.template not found at {template_path}")
+                 # Fallback: Create a basic default if template is missing (should not happen)
+                 template_content = """# Remote server configuration (DEFAULT - TEMPLATE MISSING)
 REMOTE_USER=username
 REMOTE_HOST=example.com
 REMOTE_PORT=22
@@ -100,29 +112,40 @@ WATCH_DELAY_SECONDS=2
 RCLONE_OPTIONS=--progress --transfers=4 --checkers=8 --buffer-size=32M --fast-list --delete-excluded --exclude=".*" --exclude="node_modules"
 
 # Parallel sync (multiple connections)
-ENABLE_PARALLEL_SYNC=true
 PARALLEL_PROCESSES=4
 """
-        with open(env_path, 'w') as f:
-            f.write(template_content)
-        
-        logging.info(f"Created default .env file at {env_path}")
-        
-        # Open the .env file for editing
-        os.system(f"open {env_path}")
-        
-        # Show message to user
-        import rumps
-        rumps.notification(
-            "TurboSync Setup",
-            "Configuration Required",
-            "Please edit the .env file with your settings before starting TurboSync.",
-            sound=True
-        )
-        return False
-    
-    logging.debug(f".env file found at {env_path}")
-    return True
+                 with open(USER_ENV_PATH, 'w') as f_user:
+                     f_user.write(template_content)
+                 logging.warning(f"Created basic default .env at {USER_ENV_PATH} as template was missing.")
+            else:
+                # Copy the bundled template to the user config directory
+                shutil.copy2(template_path, USER_ENV_PATH)
+                logging.info(f"Copied bundled template from {template_path} to {USER_ENV_PATH}")
+
+            # REMOVED: os.system(f"open {USER_ENV_PATH}") - Settings are now handled via dialog
+
+            # Show message to user
+            import rumps
+            rumps.notification(
+                "TurboSync Setup",
+                "Configuration Required",
+                f"Please edit the .env file located at {USER_ENV_PATH} with your settings.",
+                sound=True
+            )
+            return False # Indicate setup is needed
+        except Exception as e:
+            logging.exception(f"Failed to create user .env file: {e}")
+            import rumps
+            rumps.notification(
+                "TurboSync Error",
+                "Configuration Error",
+                f"Could not create the configuration file at {USER_ENV_PATH}. Check logs.",
+                sound=True
+            )
+            return False # Indicate failure
+
+    logging.debug(f"User .env file found at {USER_ENV_PATH}")
+    return True # Indicate .env exists and is ready
 
 def setup_icon():
     """Ensure the icon file path is correctly determined for the menubar app."""
@@ -212,10 +235,15 @@ def main():
                 logging.warning("Setup incomplete - .env file needs configuration")
                 return
             
-            # Load environment variables
-            load_dotenv()
-            logging.debug("Environment variables loaded")
-            
+            # Load environment variables from the user-specific path
+            env_loaded = load_dotenv(dotenv_path=USER_ENV_PATH)
+            if env_loaded:
+                logging.debug(f"Environment variables loaded from {USER_ENV_PATH}")
+            else:
+                logging.warning(f"Could not load environment variables from {USER_ENV_PATH}")
+                # Decide if this is fatal or if defaults can be used.
+                # For now, let's assume it might be okay if defaults are handled later.
+
             # Check dependencies
             if not check_dependencies():
                 logging.error("Dependencies check failed")

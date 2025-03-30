@@ -152,10 +152,10 @@ a = Analysis(
     pathex=['{script_dir}'],
     binaries=[],
     datas=[
-        ('{os.path.join(script_dir, ".env")}', '.'), # Include .env in the root
-        ('{icon_path}', '.'),                     # Include icon.png in the root
+        ('{os.path.join(script_dir, "dist", ".env.template")}', '.'), # Bundle the template instead of .env
+        ('{icon_path}', '.'),                                        # Include icon.png in the root
     ],
-    hiddenimports=['plistlib'], # Removed PIL._tkinter_finder
+    hiddenimports=['plistlib'],
     hookspath=[],
     hooksconfig={{}},
     runtime_hooks=[],

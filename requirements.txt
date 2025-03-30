@@ -3,3 +3,4 @@ rumps==0.4.0
 schedule==1.2.0
 pyinstaller==6.12
 fswatch
+PySide6>=6.0.0

@@ -8,10 +8,10 @@ a = Analysis(
     pathex=['/Users/john/Documents/TurboSync'],
     binaries=[],
     datas=[
-        ('/Users/john/Documents/TurboSync/.env', '.'), # Include .env in the root
-        ('/Users/john/Documents/TurboSync/turbo_sync/icon.png', '.'),                     # Include icon.png in the root
+        ('/Users/john/Documents/TurboSync/dist/.env.template', '.'), # Bundle the template instead of .env
+        ('/Users/john/Documents/TurboSync/turbo_sync/icon.png', '.'),                                        # Include icon.png in the root
     ],
-    hiddenimports=['plistlib'], # Removed PIL._tkinter_finder
+    hiddenimports=['plistlib'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
