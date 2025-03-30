@@ -1,0 +1,5 @@
+python-dotenv==1.0.0
+rumps==0.4.0
+schedule==1.2.0
+pyinstaller==6.12
+fswatch
