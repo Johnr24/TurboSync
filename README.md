@@ -1,6 +1,6 @@
 # TurboSync 🚀
 
-![the turbo link icon which is a gay pride flag with the letter T in the middle of it, the icon has rounded corners much like any other app icon](turbo_sync/icon.png)
+<p align="center"><img src="turbo_sync/icon.png" alt="the turbo link icon which is a gay pride flag with the letter T in the middle of it, the icon has rounded corners much like any other app icon" width="128"></p>
 
 A macOS menubar app that keeps local folders in sync with specific directories on a remote server. It looks for `.livework` files on the remote (via a mounted volume) and uses `rclone bisync` to synchronize those directories.
 
@@ -73,4 +73,4 @@ Enjoy seamless syncing! 🎉
 # License 
 
 A full copy of the license can be found in the github repo.
-Please note Turbosync is a signtory of the 🏳️‍🌈 Pride Flag Covenant. 
+Please note Turbosync is a signtory of the 🏳️‍🌈 Pride Flag Covenant.
