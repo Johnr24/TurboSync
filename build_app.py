@@ -195,7 +195,7 @@ exe = EXE(
     argv_emulation=False,
     target_arch=None,
     codesign_identity='-', # Apply ad-hoc signature during build
-    entitlements_file=None,
+    entitlements_file='entitlements.plist', # Disable Library Validation
     icon='{icns_path}',
 )
 
