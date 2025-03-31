@@ -278,40 +278,86 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         logging.debug("Starting sync task")
         self.syncing = True
         self.status_item.title = "Status: Syncing..."
+        success = False # Default to False
+        sync_message = "Sync did not run or failed unexpectedly." # Default message
 
         try:
-            success, message = perform_sync()
+            # --- Call perform_sync ---
+            logging.debug("Calling perform_sync()...")
+            success, sync_message = perform_sync() # Get result from perform_sync
+            logging.debug(f"perform_sync() returned: success={success}, message='{sync_message}'")
 
+            # --- Show Notification based on sync result ---
             if success:
-                logging.info(f"Sync completed successfully: {message}")
-                rumps.notification( # Reverted to rumps.notification
-                    "TurboSync",
-                    "Sync Completed",
-                    message,
-                    sound=False
-                )
+                logging.info(f"Sync completed successfully: {sync_message}")
+                try:
+                    rumps.notification(
+                        "TurboSync",
+                        "Sync Completed",
+                        sync_message,
+                        sound=False
+                    )
+                except Exception as ne:
+                    logging.error(f"Failed to show success notification: {ne}")
             else:
-                logging.error(f"Sync failed: {message}")
-                rumps.notification( # Reverted to rumps.notification
+                logging.error(f"Sync failed: {sync_message}")
+                try:
+                    rumps.notification(
+                        "TurboSync",
+                        "Sync Failed",
+                        sync_message,
+                        sound=True
+                    )
+                except Exception as ne:
+                    logging.error(f"Failed to show failure notification: {ne}")
+
+        except Exception as e:
+            # --- Handle exceptions during perform_sync() or initial notifications ---
+            logging.exception(f"Exception during sync task (perform_sync call or notification): {e}")
+            success = False # Ensure success is false on exception
+            sync_message = f"An error occurred during sync: {str(e)}" # Use message from exception
+            try:
+                # Try to show an error notification for this exception
+                rumps.notification(
                     "TurboSync",
-                    "Sync Failed",
-                    message,
+                    "Sync Error",
+                    sync_message,
                     sound=True
                 )
-        except Exception as e:
-            logging.exception(f"Exception during sync: {e}")
-            success = False
-            rumps.notification( # Reverted to rumps.notification
-                "TurboSync",
-                "Sync Error",
-                f"An error occurred during sync: {str(e)}",
-                sound=True
-            )
+            except Exception as ne:
+                 logging.error(f"Failed to show error notification after exception: {ne}")
 
-        self.last_sync_status = f"Last sync: {time.strftime('%H:%M:%S')} - {'Success' if success else 'Failed'}"
-        self.status_item.title = f"Status: {self.last_sync_status}"
-        self.syncing = False
-        logging.debug("Sync task completed")
+        # --- Code after perform_sync() call (runs regardless of success/failure/exception) ---
+        try:
+            logging.debug("Updating last sync status string...")
+            self.last_sync_status = f"Last sync: {time.strftime('%H:%M:%S')} - {'Success' if success else 'Failed'}"
+            logging.debug(f"New status string: {self.last_sync_status}")
+
+            logging.debug("Updating status_item title...")
+            self.status_item.title = f"Status: {self.last_sync_status}" # Rumps call
+            logging.debug("<<< Status_item title update attempted >>>") # ADDED THIS LINE
+            logging.debug("Status_item title updated.") # Original line moved down
+
+            logging.debug("Setting self.syncing = False")
+            self.syncing = False
+            logging.debug("Sync task thread finishing cleanly.") # Added final log
+
+        except Exception as e_after:
+             # --- Handle exceptions during the status update phase ---
+             logging.exception(f"Exception *after* sync completed/failed, during status update: {e_after}")
+             # Try to show a notification about this specific error
+             try:
+                 rumps.notification(
+                     "TurboSync",
+                     "Internal Error",
+                     f"Error updating status after sync: {str(e_after)}",
+                     sound=True
+                 )
+             except Exception as ne2:
+                 logging.error(f"Failed to show post-sync error notification: {ne2}")
+             # Ensure syncing flag is reset even if status update fails
+             logging.debug("Setting self.syncing = False after exception during status update.")
+             self.syncing = False
 
     def scheduled_sync(self):
         """Run the scheduled sync if not already syncing"""
