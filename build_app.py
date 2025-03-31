@@ -1,4 +1,4 @@
-The asset as far was empty locally so I'd removed it.#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Build script for TurboSync macOS app
 """
