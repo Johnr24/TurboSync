@@ -42,15 +42,14 @@ jobs:
       - name: Run build script
         run: python build_app.py --non-interactive # Execute build script non-interactively (fswatch/rclone pre-installed)
 
-      # Fix permissions on the app bundle to ensure it works correctly
+      # Fix permissions on the app bundle for distribution
       - name: Fix app permissions
         run: |
-          chmod -R u+w dist/TurboSync.app
-          find dist/TurboSync.app -type f -name "*.so" -exec chmod +x {} \;
-          find dist/TurboSync.app -type f -name "*.dylib" -exec chmod +x {} \;
-          chmod +x dist/TurboSync.app/Contents/MacOS/TurboSync
-          # Remove quarantine flag if it exists
+          echo "Setting standard permissions (755) on the app bundle..."
+          chmod -R 755 dist/TurboSync.app
+          echo "Removing quarantine flag..."
           xattr -d com.apple.quarantine dist/TurboSync.app || true
+          echo "Permissions fixed."
 
       # --- Release Steps (only run on tag push) ---
       - name: Determine Asset Name and Path (for Release)
