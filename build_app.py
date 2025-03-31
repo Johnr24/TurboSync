@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+The asset as far was empty locally so I'd removed it.#!/usr/bin/env python3
 """
 Build script for TurboSync macOS app
 """
@@ -166,7 +166,6 @@ a = Analysis(
     datas=[
         ('{os.path.join(script_dir, "turbo_sync", ".env.template")}', '.'), # Bundle the template from turbo_sync/
         ('{icon_path}', '.'),                                               # Include icon.png in the root
-        ('{os.path.join(script_dir, "turbo_sync", "assets")}', 'assets'),   # Include any assets folder
     ],
     hiddenimports=['plistlib', 'AppKit', 'Foundation', 'Cocoa', 'rumps', 'objc'],
     hookspath=[],

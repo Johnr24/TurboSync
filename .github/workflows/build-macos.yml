@@ -38,9 +38,6 @@ jobs:
           brew install fswatch
           brew install rclone
 
-      - name: List turbo_sync contents (Debug)
-        run: ls -l /Users/runner/work/TurboSync/TurboSync/turbo_sync/
-
       - name: Run build script
         run: python build_app.py --non-interactive # Execute build script non-interactively (fswatch/rclone pre-installed)
 
