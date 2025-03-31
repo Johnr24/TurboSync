@@ -243,12 +243,9 @@ def check_dependencies():
 
 def main():
     """Main entry point for the application"""
-    print(">>> main() started", file=sys.stderr) # Early print
     try:
         # Set up logging
-        print(">>> Calling setup_logging()...", file=sys.stderr) # Early print
         log_file = setup_logging()
-        print(f">>> setup_logging() completed. Log file should be at: {log_file}", file=sys.stderr) # Early print
         
         try:
             # Log startup information
@@ -260,21 +257,24 @@ def main():
             # Note: The actual icon setting is handled within run_app (menubar.py)
             
             # Ensure .env file exists
-            print(">>> Calling ensure_env_file()...", file=sys.stderr) # Early print
             env_ok = ensure_env_file()
-            print(f">>> ensure_env_file() completed. Result: {env_ok}", file=sys.stderr) # Early print
             if not env_ok:
-                logging.warning("Setup incomplete - .env file needs configuration or creation failed.")
-                return
-            
-            # Load environment variables from the user-specific path
-            env_loaded = load_dotenv(dotenv_path=USER_ENV_PATH)
-            if env_loaded:
-                logging.debug(f"Environment variables loaded from {USER_ENV_PATH}")
-            else:
-                logging.warning(f"Could not load environment variables from {USER_ENV_PATH}")
-                # Decide if this is fatal or if defaults can be used.
-                # For now, let's assume it might be okay if defaults are handled later.
+                # If ensure_env_file returned False, it means the file is missing AND
+                # could not be created, or requires user setup. Stop the app.
+                error_msg = "Setup incomplete. Could not create or find required .env configuration file. Please check logs or manually create ~/.Library/Application Support/TurboSync/.env from the template."
+                logging.error(error_msg)
+                try:
+                    # Attempt to show a final alert before exiting
+                    import rumps
+                    rumps.alert(title="TurboSync Startup Error", message=error_msg)
+                except Exception as alert_e:
+                    logging.error(f"Failed to show rumps alert: {alert_e}")
+                    print(f"ERROR: {error_msg}", file=sys.stderr) # Fallback print
+                sys.exit(1) # Exit the application
+
+            # --- Configuration Loading is now handled solely by menubar.py ---
+            # Remove the redundant load_dotenv call here.
+            # logging.debug(f"Skipping load_dotenv in main.py as menubar.py handles it.")
 
             # Check dependencies
             if not check_dependencies():
