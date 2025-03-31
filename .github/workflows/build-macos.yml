@@ -119,9 +119,9 @@ jobs:
           DOWNLOAD_URL="https://github.com/${{ github.repository_owner }}/${{ github.event.repository.name }}/releases/download/${{ steps.vars.outputs.TAG_NAME }}/${{ steps.vars.outputs.DMG_NAME }}"
           # Get checksum from previous step
           SHA256="${{ steps.checksum.outputs.DMG_CHECKSUM }}"
-          FORMULA_PATH="homebrew-tap/Formula/turbosync.rb"
+          CASK_PATH="homebrew-tap/Casks/turbosync.rb" # Changed from FORMULA_PATH
 
-          echo "Updating formula: ${FORMULA_PATH}"
+          echo "Updating Cask: ${CASK_PATH}" # Changed from formula
           echo "  Version: ${VERSION}"
           echo "  Download URL: ${DOWNLOAD_URL}"
           echo "  SHA256: ${SHA256}"
@@ -134,10 +134,10 @@ jobs:
           version = "$VERSION"
           url = "$DOWNLOAD_URL"
           sha256 = "$SHA256"
-          formula_path = "$FORMULA_PATH"
+          cask_path = "$CASK_PATH" # Changed from formula_path
 
           try:
-              with open(formula_path, 'r') as f:
+              with open(cask_path, 'r') as f: # Changed from formula_path
                   content = f.read()
 
               # Update version
@@ -147,12 +147,12 @@ jobs:
               # Update sha256
               content = re.sub(r'(sha256\s+)"[^"]+"', r'\1"' + sha256 + '"', content)
 
-              with open(formula_path, 'w') as f:
+              with open(cask_path, 'w') as f: # Changed from formula_path
                   f.write(content)
 
-              print(f"Successfully updated {formula_path}")
+              print(f"Successfully updated {cask_path}") # Changed from formula_path
           except Exception as e:
-              print(f"Error updating formula file: {e}")
+              print(f"Error updating Cask file: {e}") # Changed from formula
               sys.exit(1)
           EOF
 
@@ -162,12 +162,12 @@ jobs:
           cd homebrew-tap # Change directory into the checked-out tap repo
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/turbosync.rb
+          git add Casks/turbosync.rb # Changed from Formula/turbosync.rb
           # Check if there are changes to commit
           if git diff --staged --quiet; then
-            echo "No changes to commit to Homebrew formula."
+            echo "No changes to commit to Homebrew Cask." # Changed from formula
           else
-            git commit -m "Update turbosync formula to version ${{ steps.vars.outputs.TAG_NAME }}"
+            git commit -m "Update turbosync cask to version ${{ steps.vars.outputs.TAG_NAME }}" # Changed from formula
             
             echo "Attempting to push to Homebrew tap repository..."
             echo "If this fails with a 403 error, please ensure your HOMEBREW_TAP_TOKEN has the 'repo' scope"
@@ -180,7 +180,7 @@ jobs:
               exit 1
             }
             
-            echo "Successfully pushed updated formula to Johnr24/homebrew-turbosync"
+            echo "Successfully pushed updated Cask to Johnr24/homebrew-turbosync" # Changed from formula
           fi
           cd .. # Change back to the original directory
 
