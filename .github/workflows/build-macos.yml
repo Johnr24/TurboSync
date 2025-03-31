@@ -32,6 +32,16 @@ jobs:
 
       - name: Run build script
         run: python build_app.py --non-interactive --install-fswatch # Execute build script non-interactively
+        
+      # Fix permissions on the app bundle to ensure it works correctly
+      - name: Fix app permissions
+        run: |
+          chmod -R u+w dist/TurboSync.app
+          find dist/TurboSync.app -type f -name "*.so" -exec chmod +x {} \;
+          find dist/TurboSync.app -type f -name "*.dylib" -exec chmod +x {} \;
+          chmod +x dist/TurboSync.app/Contents/MacOS/TurboSync
+          # Remove quarantine flag if it exists
+          xattr -d com.apple.quarantine dist/TurboSync.app || true
 
       - name: Upload macOS App Artifact
         uses: actions/upload-artifact@v4

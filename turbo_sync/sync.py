@@ -267,8 +267,11 @@ def sync_directory(remote_path, local_base_dir, config):
     # Split options, remove --bidir if present, then rejoin
     rclone_opts_list = [opt for opt in rclone_opts_str.split() if opt != '--bidir']
 
+    # Use the full path to rclone if available
+    rclone_executable = os.environ.get('RCLONE_PATH', 'rclone')
+    
     rclone_cmd = [
-        'rclone', 'bisync',
+        rclone_executable, 'bisync',
         f"{remote_path}/",
         f"{local_path}/"
     ] + rclone_opts_list # Add options from config, excluding --bidir

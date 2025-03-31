@@ -178,10 +178,28 @@ def check_dependencies():
     logging.debug("Checking dependencies")
     # Check if rclone is available
     try:
-        result = subprocess.run(["rclone", "version"], capture_output=True, check=True)
-        rclone_version = result.stdout.decode('utf-8').split('\n')[0]
-        logging.info(f"rclone found: {rclone_version}")
-    except (subprocess.SubprocessError, FileNotFoundError) as e:
+        # Try with full path first (for when launched from Applications)
+        rclone_paths = [
+            "/opt/homebrew/bin/rclone",  # Homebrew on Apple Silicon
+            "/usr/local/bin/rclone",     # Homebrew on Intel Mac
+            "rclone"                     # In PATH
+        ]
+        
+        for rclone_path in rclone_paths:
+            try:
+                result = subprocess.run([rclone_path, "version"], capture_output=True, check=True)
+                rclone_version = result.stdout.decode('utf-8').split('\n')[0]
+                logging.info(f"rclone found: {rclone_version}")
+                
+                # Set the full path in environment for future use
+                os.environ["RCLONE_PATH"] = rclone_path
+                return True
+            except (subprocess.SubprocessError, FileNotFoundError):
+                continue
+                
+        # If we get here, none of the paths worked
+        raise FileNotFoundError("rclone not found in any of the expected locations")
+    except Exception as e:
         logging.error(f"rclone not found: {e}")
         import rumps
         rumps.notification(

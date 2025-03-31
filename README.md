@@ -54,9 +54,14 @@ TurboSort can be found here - https://github.com/johnr24/TurboSort
 
 5.  **Build the App:**
     ```bash
+    # Standard interactive build (with prompts)
     python build_app.py
+    
+    # OR build and install to Applications folder with sudo (recommended)
+    python build_app.py --sudo-install
     ```
-    *   This creates `TurboSync.app` in the `dist/` folder. Move it to `/Applications` if desired.
+    *   This creates `TurboSync.app` in the `dist/` folder and can install it to `/Applications` with proper permissions.
+    *   Using the `--sudo-install` flag is recommended to avoid permission issues when running from Applications.
 
 6.  **Run:** Launch `TurboSync.app`. Check the menubar icon!
 
@@ -74,8 +79,34 @@ TurboSort can be found here - https://github.com/johnr24/TurboSort
 
 Enjoy seamless syncing! 🎉
 
+## Troubleshooting 🔧
 
-# License 
+### Permission Issues
+
+If you encounter permission issues when copying the app to the Applications folder or when running it:
+
+1. **Use the sudo-install flag:**
+   ```bash
+   python build_app.py --sudo-install
+   ```
+   This will build the app and install it to the Applications folder with the correct permissions.
+
+2. **Manual fix for existing app:**
+   ```bash
+   # Fix permissions on the app bundle
+   sudo chmod -R 755 /Applications/TurboSync.app
+   sudo chmod +x /Applications/TurboSync.app/Contents/MacOS/TurboSync
+   
+   # Remove quarantine flag if present
+   sudo xattr -d com.apple.quarantine /Applications/TurboSync.app
+   ```
+
+3. **App doesn't appear in menubar:**
+   - Make sure the app has permissions to run as a background application
+   - Check the logs at `~/Library/Logs/TurboSync/turbosync.log`
+   - Ensure rclone and fswatch are installed and in your PATH
+
+# License
 
 A full copy of the license can be found in the github repo.
 Please note Turbosync is a signtory of the 🏳️‍🌈 Pride Flag Covenant.

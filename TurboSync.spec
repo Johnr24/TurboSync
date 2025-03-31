@@ -10,8 +10,9 @@ a = Analysis(
     datas=[
         ('/Users/john/Documents/TurboSync/turbo_sync/.env.template', '.'), # Bundle the template from turbo_sync/
         ('/Users/john/Documents/TurboSync/turbo_sync/icon.png', '.'),                                               # Include icon.png in the root
+        ('/Users/john/Documents/TurboSync/turbo_sync/assets', 'assets'),   # Include any assets folder
     ],
-    hiddenimports=['plistlib'],
+    hiddenimports=['plistlib', 'AppKit', 'Foundation', 'Cocoa', 'rumps', 'objc'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -36,8 +37,8 @@ exe = EXE(
     upx=True,
     console=False, # Reverted back to False for menubar app
     disable_windowed_traceback=False,
-    argv_emulation=True,
-    target_arch='arm64',
+    argv_emulation=False,
+    target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon='/Users/john/Documents/TurboSync/TurboSync.icns',
@@ -66,7 +67,16 @@ app = BUNDLE(
         'CFBundleVersion': '1.0.0',
         'CFBundleShortVersionString': '1.0.0',
         'NSHighResolutionCapable': True,
-        'LSUIElement': True,  # Uncommented for menubar app
+        'LSUIElement': True,  # For menubar app
         'LSBackgroundOnly': False,
+        'NSPrincipalClass': 'NSApplication',
+        'NSAppleScriptEnabled': False,
+        'CFBundleDocumentTypes': [],
+        'CFBundleExecutable': 'TurboSync',  # Must match the EXE name
+        'NSRequiresAquaSystemAppearance': False,  # Support dark mode
+        'LSApplicationCategoryType': 'public.app-category.utilities',
+        'LSEnvironment': {
+            'PATH': '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+        },
     },
 )

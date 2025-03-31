@@ -145,6 +145,31 @@ def build_app(args):
     """Build the macOS app using PyInstaller"""
     print("Building TurboSync macOS app...")
     
+    # Fix permissions and remove quarantine flag
+    def fix_app_permissions(app_path):
+        """Fix permissions and remove quarantine flag from the app"""
+        print(f"Fixing permissions and removing quarantine flag from {app_path}...")
+        try:
+            # Make the entire app bundle writable
+            subprocess.run(["chmod", "-R", "u+w", app_path], check=False)
+            
+            # Make all executables executable
+            subprocess.run(["find", app_path, "-type", "f", "-name", "*.so", "-exec", "chmod", "+x", "{}", ";"], check=False)
+            subprocess.run(["find", app_path, "-type", "f", "-name", "*.dylib", "-exec", "chmod", "+x", "{}", ";"], check=False)
+            
+            # Make the main executable executable
+            executable_path = os.path.join(app_path, "Contents/MacOS/TurboSync")
+            if os.path.exists(executable_path):
+                subprocess.run(["chmod", "+x", executable_path], check=False)
+            
+            # Remove quarantine flag
+            subprocess.run(["xattr", "-d", "com.apple.quarantine", app_path], check=False)
+            
+            return True
+        except Exception as e:
+            print(f"Warning: Failed to fix permissions: {e}")
+            return False
+    
     # Ensure we're in the right directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
@@ -174,8 +199,9 @@ a = Analysis(
     datas=[
         ('{os.path.join(script_dir, "turbo_sync", ".env.template")}', '.'), # Bundle the template from turbo_sync/
         ('{icon_path}', '.'),                                               # Include icon.png in the root
+        ('{os.path.join(script_dir, "turbo_sync", "assets")}', 'assets'),   # Include any assets folder
     ],
-    hiddenimports=['plistlib'],
+    hiddenimports=['plistlib', 'AppKit', 'Foundation', 'Cocoa', 'rumps', 'objc'],
     hookspath=[],
     hooksconfig={{}},
     runtime_hooks=[],
@@ -200,8 +226,8 @@ exe = EXE(
     upx=True,
     console=False, # Reverted back to False for menubar app
     disable_windowed_traceback=False,
-    argv_emulation=True,
-    target_arch='arm64',
+    argv_emulation=False,
+    target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon='{icns_path}',
@@ -230,8 +256,17 @@ app = BUNDLE(
         'CFBundleVersion': '1.0.0',
         'CFBundleShortVersionString': '1.0.0',
         'NSHighResolutionCapable': True,
-        'LSUIElement': True,  # Uncommented for menubar app
+        'LSUIElement': True,  # For menubar app
         'LSBackgroundOnly': False,
+        'NSPrincipalClass': 'NSApplication',
+        'NSAppleScriptEnabled': False,
+        'CFBundleDocumentTypes': [],
+        'CFBundleExecutable': 'TurboSync',  # Must match the EXE name
+        'NSRequiresAquaSystemAppearance': False,  # Support dark mode
+        'LSApplicationCategoryType': 'public.app-category.utilities',
+        'LSEnvironment': {{
+            'PATH': '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+        }},
     }},
 )
 '''
@@ -250,7 +285,11 @@ app = BUNDLE(
     # Removed redundant copy of .env to dist folder
     
     print("Build complete!")
-    print(f"App is located at: {os.path.join(script_dir, 'dist', 'TurboSync.app')}")
+    app_path = os.path.join(script_dir, "dist", "TurboSync.app")
+    print(f"App is located at: {app_path}")
+    
+    # Fix permissions on the app in the dist folder
+    fix_app_permissions(app_path)
 
     # Install and launch only if interactive and requested
     if not args.non_interactive:
@@ -269,7 +308,10 @@ app = BUNDLE(
             print(f"Installing app to {applications_path}...")
             shutil.copytree(app_path, applications_path)
             print(f"TurboSync app installed to {applications_path}")
-
+            
+            # Fix permissions and remove quarantine flag
+            fix_app_permissions(applications_path)
+            
             # Ask to launch the app
             launch_response = input("Do you want to launch TurboSync now? (y/n): ").strip().lower()
             if launch_response == 'y':
@@ -278,6 +320,33 @@ app = BUNDLE(
     else:
         print("Skipping installation and launch prompts in non-interactive mode.")
 
+
+def install_with_sudo(app_path, applications_path):
+    """Install the app to the Applications folder using sudo to avoid permission issues"""
+    print(f"Installing {app_path} to {applications_path} using sudo...")
+    try:
+        # Remove existing app if it exists
+        if os.path.exists(applications_path):
+            print(f"Removing existing app at {applications_path}...")
+            subprocess.run(["sudo", "rm", "-rf", applications_path], check=True)
+        
+        # Copy the app
+        print(f"Copying app to {applications_path}...")
+        subprocess.run(["sudo", "cp", "-R", app_path, applications_path], check=True)
+        
+        # Fix permissions
+        print(f"Setting permissions...")
+        subprocess.run(["sudo", "chmod", "-R", "755", applications_path], check=True)
+        
+        # Remove quarantine flag
+        print(f"Removing quarantine flag...")
+        subprocess.run(["sudo", "xattr", "-d", "com.apple.quarantine", applications_path], check=False)
+        
+        print(f"Successfully installed {app_path} to {applications_path}")
+        return True
+    except Exception as e:
+        print(f"Error installing app: {e}")
+        return False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build the TurboSync macOS app.")
@@ -291,6 +360,11 @@ if __name__ == "__main__":
         action='store_true',
         help='Attempt to install fswatch using Homebrew if not found (requires Homebrew). Only effective in non-interactive mode if Homebrew is present.'
     )
+    parser.add_argument(
+        '--sudo-install',
+        action='store_true',
+        help='Install app to /Applications using sudo (avoids permission issues)'
+    )
     # Add flags for install/launch if needed for non-interactive local use,
     # but typically not desired for CI.
     # parser.add_argument('--install-app', action='store_true', help='Install app to /Applications (non-interactive).')
@@ -298,3 +372,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     build_app(args)
+    
+    # If --sudo-install flag is provided, install the app using sudo
+    if hasattr(args, 'sudo_install') and args.sudo_install:
+        app_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist", "TurboSync.app")
+        applications_path = "/Applications/TurboSync.app"
+        install_with_sudo(app_path, applications_path)
