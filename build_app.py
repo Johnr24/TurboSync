@@ -254,9 +254,10 @@ app = BUNDLE(
     print("Build complete!")
     app_path = os.path.join(script_dir, "dist", "TurboSync.app")
     print(f"App is located at: {app_path}")
-    
-    # Fix permissions on the app in the dist folder
-    fix_app_permissions(app_path)
+
+    # Removed call to internal fix_app_permissions.
+    # Permissions are now handled comprehensively in the GitHub Actions workflow
+    # fix_app_permissions(app_path)
 
     # Install and launch only if interactive and requested, AND sudo install is not specified
     if not args.non_interactive and not args.sudo_install:

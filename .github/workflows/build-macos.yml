@@ -42,13 +42,16 @@ jobs:
       - name: Run build script
         run: python build_app.py --non-interactive # Execute build script non-interactively (fswatch/rclone pre-installed)
 
-      # Fix permissions on the app bundle for distribution
+      # Fix ownership, attributes, and permissions on the app bundle for distribution
       - name: Fix app permissions
         run: |
-          echo "Setting standard permissions (755) on the app bundle..."
-          chmod -R 755 dist/TurboSync.app
-          echo "Removing quarantine flag..."
-          xattr -d com.apple.quarantine dist/TurboSync.app || true
+          APP_PATH="dist/TurboSync.app"
+          echo "Setting ownership to runner:staff on ${APP_PATH}..."
+          sudo chown -R runner:staff "${APP_PATH}"
+          echo "Recursively clearing extended attributes on ${APP_PATH}..."
+          xattr -cr "${APP_PATH}"
+          echo "Setting standard permissions (755) on ${APP_PATH}..."
+          chmod -R 755 "${APP_PATH}"
           echo "Permissions fixed."
 
       # --- Release Steps (only run on tag push) ---
