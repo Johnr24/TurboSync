@@ -35,15 +35,11 @@ Please note that This application uses the Rclone bisync feature, which is as of
 
 ## Brew Install! 🍻
 
-```
+```bash
 brew tap johnr24/turbosync
-brew install turbosync
+brew install --cask turbosync
 ```
-once that's done you can then do 
-```
-  ln -sfn "/opt/homebrew/opt/turbosync/TurboSync.app" /Applications/TurboSync.app
-```
-To link it to your app folder! 
+This will install `TurboSync.app` directly into your `/Applications` folder.
 ## Manual Install 
 1.  **Clone:**
     ```bash
