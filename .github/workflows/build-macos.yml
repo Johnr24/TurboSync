@@ -92,6 +92,85 @@ jobs:
           echo "DMG created: ${{ steps.vars.outputs.DMG_NAME }}"
           ls -l "${{ steps.vars.outputs.DMG_NAME }}"
 
+      - name: Calculate DMG Checksum (for Homebrew)
+        if: startsWith(github.ref, 'refs/tags/') # Only run for tags
+        id: checksum
+        run: |
+          checksum=$(shasum -a 256 "${{ steps.vars.outputs.DMG_NAME }}" | awk '{print $1}')
+          echo "DMG_CHECKSUM=${checksum}" >> $GITHUB_OUTPUT
+          echo "Calculated SHA256: ${checksum}"
+
+      - name: Checkout Homebrew Tap Repo
+        if: startsWith(github.ref, 'refs/tags/') # Only run for tags
+        uses: actions/checkout@v4
+        with:
+          repository: Johnr24/homebrew-turbosync
+          path: homebrew-tap # Checkout into a subdirectory
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }} # Use the PAT
+
+      - name: Update Homebrew Formula
+        if: startsWith(github.ref, 'refs/tags/') # Only run for tags
+        run: |
+          # Extract version from tag (e.g., v1.2.3 -> 1.2.3)
+          VERSION=$(echo "${{ steps.vars.outputs.TAG_NAME }}" | sed 's/^v//')
+          # Construct download URL
+          DOWNLOAD_URL="https://github.com/${{ github.repository_owner }}/${{ github.event.repository.name }}/releases/download/${{ steps.vars.outputs.TAG_NAME }}/${{ steps.vars.outputs.DMG_NAME }}"
+          # Get checksum from previous step
+          SHA256="${{ steps.checksum.outputs.DMG_CHECKSUM }}"
+          FORMULA_PATH="homebrew-tap/Formula/turbosync.rb"
+
+          echo "Updating formula: ${FORMULA_PATH}"
+          echo "  Version: ${VERSION}"
+          echo "  Download URL: ${DOWNLOAD_URL}"
+          echo "  SHA256: ${SHA256}"
+
+          # Use Python to update the formula file reliably
+          python - << EOF
+          import re
+          import sys
+
+          version = "$VERSION"
+          url = "$DOWNLOAD_URL"
+          sha256 = "$SHA256"
+          formula_path = "$FORMULA_PATH"
+
+          try:
+              with open(formula_path, 'r') as f:
+                  content = f.read()
+
+              # Update version
+              content = re.sub(r'(version\s+)"[^"]+"', r'\1"' + version + '"', content)
+              # Update URL
+              content = re.sub(r'(url\s+)"[^"]+"', r'\1"' + url + '"', content)
+              # Update sha256
+              content = re.sub(r'(sha256\s+)"[^"]+"', r'\1"' + sha256 + '"', content)
+
+              with open(formula_path, 'w') as f:
+                  f.write(content)
+
+              print(f"Successfully updated {formula_path}")
+          except Exception as e:
+              print(f"Error updating formula file: {e}")
+              sys.exit(1)
+          EOF
+
+      - name: Commit and Push Formula Changes
+        if: startsWith(github.ref, 'refs/tags/') # Only run for tags
+        run: |
+          cd homebrew-tap # Change directory into the checked-out tap repo
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/turbosync.rb
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit to Homebrew formula."
+          else
+            git commit -m "Update turbosync formula to version ${{ steps.vars.outputs.TAG_NAME }}"
+            git push
+            echo "Pushed updated formula to Johnr24/homebrew-turbosync"
+          fi
+          cd .. # Change back to the original directory
+
       - name: Create Release and Upload Release Asset
         if: startsWith(github.ref, 'refs/tags/') # Only run for tags
         uses: softprops/action-gh-release@v2
