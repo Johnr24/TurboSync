@@ -194,7 +194,7 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
+    codesign_identity='-', # Apply ad-hoc signature during build
     entitlements_file=None,
     icon='{icns_path}',
 )

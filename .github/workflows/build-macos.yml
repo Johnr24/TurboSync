@@ -166,8 +166,8 @@ jobs:
             echo "No changes to commit to Homebrew formula."
           else
             git commit -m "Update turbosync formula to version ${{ steps.vars.outputs.TAG_NAME }}"
-            # Push using the PAT for authentication to the main branch
-            git push https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/Johnr24/homebrew-turbosync.git HEAD:main
+            # Push using the PAT for authentication to the main branch, exit on error
+            git push https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/Johnr24/homebrew-turbosync.git HEAD:main || exit 1
             echo "Pushed updated formula to Johnr24/homebrew-turbosync"
           fi
           cd .. # Change back to the original directory
