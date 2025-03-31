@@ -6,7 +6,8 @@ from collections import OrderedDict
 # Keep these imports specific to this file
 from PySide6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QFormLayout, QLabel, QLineEdit,
-    QCheckBox, QPushButton, QDialogButtonBox, QGroupBox, QSpinBox, QPlainTextEdit
+    QCheckBox, QPushButton, QDialogButtonBox, QGroupBox, QSpinBox, QPlainTextEdit,
+    QHBoxLayout, QFileDialog  # Added QHBoxLayout and QFileDialog
 )
 from PySide6.QtCore import Qt # Keep Qt if needed, Slot might not be
 
@@ -179,9 +180,21 @@ QPushButton:pressed {
                      widget.setPlainText(current_value if current_value is not None else str(default_value))
                      widget.setFixedHeight(80) # Set a fixed height for the text area
 
-
                 self.widgets[key] = widget
-                form_layout.addRow(QLabel(label_text), widget)
+
+                # --- Special handling for directory paths ---
+                if key in ["LOCAL_DIR", "MOUNTED_VOLUME_PATH"]:
+                    browse_button = QPushButton("Browse...")
+                    # Use a lambda to pass the specific line edit to the slot
+                    browse_button.clicked.connect(lambda checked=False, le=widget: self._browse_directory(le))
+
+                    hbox = QHBoxLayout()
+                    hbox.addWidget(widget) # Add the QLineEdit
+                    hbox.addWidget(browse_button) # Add the Browse button
+                    form_layout.addRow(QLabel(label_text), hbox) # Add the hbox containing both
+                else:
+                    # Default behavior for other widget types
+                    form_layout.addRow(QLabel(label_text), widget)
 
             group_box.setLayout(form_layout)
             layout.addWidget(group_box)
@@ -193,6 +206,18 @@ QPushButton:pressed {
         layout.addWidget(button_box)
 
         self.setLayout(layout)
+
+    def _browse_directory(self, line_edit_widget):
+        """Opens a directory selection dialog and updates the QLineEdit."""
+        # Get the current path from the line edit, if any, to start the dialog there
+        current_path = line_edit_widget.text()
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Directory",
+            current_path # Start browsing from the current path in the line edit
+        )
+        if directory: # If the user selected a directory (didn't cancel)
+            line_edit_widget.setText(directory)
 
     def get_settings(self):
         """Retrieves the settings from the widgets."""
@@ -206,7 +231,7 @@ QPushButton:pressed {
             elif isinstance(widget, QSpinBox):
                 new_settings[key] = str(widget.value()) # Store as string
             elif isinstance(widget, QPlainTextEdit):
-                 new_settings[key] = widget.toPlainText()
+                new_settings[key] = widget.toPlainText()
 
         return new_settings
 
