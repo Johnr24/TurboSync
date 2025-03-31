@@ -9,6 +9,9 @@ on:
     branches: [ main ] # Optional: Trigger on PRs to main
   workflow_dispatch: # Allow manual triggering
 
+permissions: # Added: Grant permission to create releases
+  contents: write
+
 jobs:
   build:
     name: Build macOS App Bundle
@@ -43,7 +46,52 @@ jobs:
           # Remove quarantine flag if it exists
           xattr -d com.apple.quarantine dist/TurboSync.app || true
 
+      # --- Release Steps (only run on tag push) ---
+      - name: Determine Asset Name and Path (for Release)
+        if: startsWith(github.ref, 'refs/tags/') # Only run for tags
+        id: vars
+        run: |
+          APP_NAME="TurboSync" # Or derive from setup.py if needed
+          APP_PATH="dist/${APP_NAME}.app"
+          TAG_NAME="${{ github.ref_name }}" # e.g., v0.1.0
+          ZIP_NAME="${APP_NAME}-${TAG_NAME}.zip"
+          echo "APP_PATH=${APP_PATH}" >> $GITHUB_OUTPUT
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Check if App exists (for Release)
+        if: startsWith(github.ref, 'refs/tags/') # Only run for tags
+        run: |
+          echo "Checking for application at ${{ steps.vars.outputs.APP_PATH }}"
+          ls -l dist/
+          if [ ! -d "${{ steps.vars.outputs.APP_PATH }}" ]; then
+            echo "Error: Application bundle not found at ${{ steps.vars.outputs.APP_PATH }}"
+            exit 1
+          fi
+
+      - name: Zip the application bundle (for Release)
+        if: startsWith(github.ref, 'refs/tags/') # Only run for tags
+        run: |
+          echo "Zipping ${{ steps.vars.outputs.APP_PATH }} into ${{ steps.vars.outputs.ZIP_NAME }}"
+          # Zip using the relative path from the workspace root
+          zip -r "${{ steps.vars.outputs.ZIP_NAME }}" "${{ steps.vars.outputs.APP_PATH }}"
+          echo "Zip created: ${{ steps.vars.outputs.ZIP_NAME }}"
+          ls -l ${{ steps.vars.outputs.ZIP_NAME }}
+
+      - name: Create Release and Upload Release Asset
+        if: startsWith(github.ref, 'refs/tags/') # Only run for tags
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.vars.outputs.ZIP_NAME }}
+          tag_name: ${{ steps.vars.outputs.TAG_NAME }}
+          name: Release ${{ steps.vars.outputs.TAG_NAME }}
+          body: Automated release for ${{ steps.vars.outputs.TAG_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- Artifact Upload (only run on non-tag pushes/PRs) ---
       - name: Upload macOS App Artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }} # Corrected: Only run for non-tags
         uses: actions/upload-artifact@v4
         with:
           name: TurboSync-macOS-App # Name of the artifact zip file

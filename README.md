@@ -25,12 +25,24 @@ It also features optional real-time local file watching using `fswatch` to trigg
 ## This repo should not be confused with sibiling project "TurboSort" 👀
 <p align="center"><img src="readme/image.png" alt="The image depicts a David Mitchell from that Mitchell and Web Look, in the get me hennimore sketch, in a suit holding two signs one says Turbosync, Not TurboSort the other says, Turbo Sort not Turbo Sync, David is sitting down across from a table, a medium wide shot. set against an office background." width="512"></p>
 
-Turbosort can be found here and is designed to work in tadem with colourstream or any S3 Server as a one way file moving operation. 
+Turbosort can be found here and is designed to work in tadem with colourstream or any S3 Server as a one way file transfer operation. 
 
 TurboSort can be found here - https://github.com/johnr24/TurboSort
 
 ## Quick Install & Setup 🛠️
 
+## Brew Install! 🍻
+
+```
+brew tap johnr24/turbosync
+brew install turbosync
+```
+once that's done you can then do 
+```
+  ln -sfn "/opt/homebrew/opt/turbosync/TurboSync.app" /Applications/TurboSync.app
+```
+To link it to your app folder! 
+## Manual Install 
 1.  **Clone:**
     ```bash
     git clone https://github.com/johnr24/TurboSync.git
