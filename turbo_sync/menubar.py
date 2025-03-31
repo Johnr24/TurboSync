@@ -357,8 +357,42 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
              except Exception as ne2:
                  logging.error(f"Failed to show post-sync error notification: {ne2}")
              # Ensure syncing flag is reset even if status update fails
-             logging.debug("Setting self.syncing = False after exception during status update.")
+             # --- Schedule UI Update on Main Thread ---
+             # Instead of updating UI directly, schedule it via a timer
+             # Pass the results (success, sync_message) to the timer callback
+             logging.debug(f"Scheduling status update via timer with success={success}")
+             # Use a very short interval (e.g., 0.1s) just to defer execution to the main loop
+             rumps.Timer(self._update_status_after_sync, 0.1).start(timer_info=(success, sync_message))
+             logging.debug("Timer started for status update. Sync task thread finishing.")
+             # Note: self.syncing will now be set to False within _update_status_after_sync
+ 
+    def _update_status_after_sync(self, timer_info):
+        """Update status item and syncing flag on the main thread after sync."""
+        # timer_info is expected to be a tuple: (success_status, sync_message_string)
+        if not isinstance(timer_info, tuple) or len(timer_info) != 2:
+             logging.error(f"Invalid timer_info received in _update_status_after_sync: {timer_info}")
+             # Attempt to reset syncing flag anyway
              self.syncing = False
+             return
+
+        success, sync_message = timer_info # Unpack the data passed via the timer
+        try:
+            logging.debug(f"Timer callback: Updating status after sync (success={success})")
+            self.last_sync_status = f"Last sync: {time.strftime('%H:%M:%S')} - {'Success' if success else 'Failed'}"
+            logging.debug(f"Timer callback: New status string: {self.last_sync_status}")
+
+            logging.debug("Timer callback: Updating status_item title...")
+            self.status_item.title = f"Status: {self.last_sync_status}"
+            logging.debug("Timer callback: Status_item title updated.")
+
+            logging.debug("Timer callback: Setting self.syncing = False")
+            self.syncing = False
+            logging.debug("Timer callback: Status update complete.")
+
+        except Exception as e:
+            logging.exception(f"Exception during timer-based status update: {e}")
+            # Attempt to set syncing to False even if status update fails
+            self.syncing = False
 
     def scheduled_sync(self):
         """Run the scheduled sync if not already syncing"""
