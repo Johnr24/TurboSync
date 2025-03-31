@@ -13,7 +13,6 @@ a = Analysis(
     datas=[
         ('/Users/john/Documents/TurboSync/turbo_sync/.env.template', '.'), # Bundle the template from turbo_sync/
         ('/Users/john/Documents/TurboSync/turbo_sync/icon.png', '.'),                                               # Include icon.png in the root
-        ('/Users/john/Documents/TurboSync/turbo_sync/assets', 'assets'),   # Include any assets folder
     ],
     hiddenimports=['plistlib', 'AppKit', 'Foundation', 'Cocoa', 'rumps', 'objc'],
     hookspath=[],
@@ -42,8 +41,8 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
+    codesign_identity='-', # Apply ad-hoc signature during build
+    entitlements_file='entitlements.plist', # Disable Library Validation
     icon='/Users/john/Documents/TurboSync/TurboSync.icns',
 )
 

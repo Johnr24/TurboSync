@@ -4,6 +4,7 @@ import time
 import threading
 import logging
 import rumps
+import subprocess # Added for AppleScript execution
 # Removed explicit component imports for rumps 0.4.0
 # from rumps import separator, Text, EditText, Checkbox, Window, MenuItem, App, notification, quit_application
 import schedule
@@ -338,6 +339,77 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 sound=False
             )
 
+    # --- Helper Functions for Login Item ---
+
+    def _get_app_path(self):
+        """Determines the path to the running application bundle (.app)."""
+        logging.debug("Determining application path...")
+        # When running as a bundled app, sys.executable is inside the bundle
+        # e.g., /Applications/TurboSync.app/Contents/MacOS/python
+        if ".app/Contents/MacOS/" in sys.executable:
+            # Go up three levels to get the .app path
+            app_path = os.path.abspath(os.path.join(os.path.dirname(sys.executable), '..', '..', '..'))
+            logging.debug(f"Detected running as bundled app. Path: {app_path}")
+            return app_path
+        else:
+            # Likely running from source (e.g., python main.py)
+            # In this case, adding to login items might not be the desired behavior,
+            # or we might need a different approach (e.g., launching the source script).
+            # For now, return None to indicate it's not a standard .app launch.
+            logging.warning("Not running as a bundled .app. Cannot determine .app path for login item.")
+            return None
+
+    def _set_login_item(self, enable):
+        """Adds or removes the application from macOS Login Items using AppleScript."""
+        app_path = self._get_app_path()
+        if not app_path:
+            logging.error("Cannot set login item: Application path not found (not running as .app?).")
+            rumps.notification("TurboSync Error", "Login Item Failed", "Could not determine application path.")
+            return False
+
+        app_name = os.path.basename(app_path).replace('.app', '')
+        logging.info(f"{'Enabling' if enable else 'Disabling'} login item for {app_name} at {app_path}")
+
+        try:
+            if enable:
+                script = f'''
+                tell application "System Events"
+                    if not (exists login item "{app_name}") then
+                        make new login item at end with properties {{path:"{app_path}", hidden:false}}
+                        log "Added login item: {app_name}"
+                    else
+                        log "Login item already exists: {app_name}"
+                    end if
+                end tell
+                '''
+            else:
+                script = f'''
+                tell application "System Events"
+                    if (exists login item "{app_name}") then
+                        delete login item "{app_name}"
+                        log "Deleted login item: {app_name}"
+                    else
+                        log "Login item does not exist: {app_name}"
+                    end if
+                end tell
+                '''
+            
+            # Execute the AppleScript
+            process = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, check=True)
+            logging.info(f"AppleScript execution successful for login item: {process.stdout.strip()}")
+            return True
+        except subprocess.CalledProcessError as e:
+            logging.error(f"AppleScript execution failed for login item: {e}")
+            logging.error(f"AppleScript stderr: {e.stderr}")
+            rumps.notification("TurboSync Error", "Login Item Failed", f"Could not {'add' if enable else 'remove'} login item: {e.stderr[:100]}")
+            return False
+        except Exception as e:
+            logging.exception(f"Unexpected error setting login item: {e}")
+            rumps.notification("TurboSync Error", "Login Item Failed", f"Unexpected error: {e}")
+            return False
+
+    # --- End Helper Functions ---
+
     def _load_current_settings(self):
         """Loads current settings from the user's .env file."""
         logging.debug(f"Attempting to load settings from {USER_ENV_PATH}")
@@ -410,7 +482,12 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                      if self.file_watcher:
                          self.file_watcher.stop()
                      self.setup_file_watcher() # Re-setup with new config
-
+ 
+            # --- Handle Start at Login ---
+            start_at_login = str(new_settings.get('START_AT_LOGIN', 'false')).lower() == 'true'
+            self._set_login_item(start_at_login)
+            # --- End Handle Start at Login ---
+ 
             return True
         except Exception as e:
             logging.exception(f"Error saving settings to {USER_ENV_PATH}: {e}")

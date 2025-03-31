@@ -3,6 +3,7 @@ import time
 import logging
 import threading
 import subprocess
+import shutil # Added for shutil.which fallback
 # from fswatch import Monitor # Removed - Using subprocess directly
 from dotenv import load_dotenv
 
@@ -117,10 +118,16 @@ class FileWatcher:
     
     def _watch_files_subprocess(self):
         """Watch files using a subprocess to avoid signal handling issues"""
+        fswatch_path = _get_bundled_fswatch_path()
+        if not fswatch_path:
+            logging.error("fswatch executable not found. Cannot start file watcher subprocess.")
+            self.running = False
+            return
+
         try:
-            logging.debug("Starting fswatch subprocess")
+            logging.debug(f"Starting fswatch subprocess using path: {fswatch_path}")
             process = subprocess.Popen(
-                ["fswatch", "-r", self.local_dir],
+                [fswatch_path, "-r", self.local_dir], # Use the determined path
                 stdout=subprocess.PIPE,
                 text=True,
                 bufsize=1
@@ -192,23 +199,38 @@ class FileWatcher:
             logging.error(f"Error stopping file watcher: {str(e)}", exc_info=True)
 
 
+def _get_bundled_fswatch_path():
+    """Determines the expected path to the fswatch binary bundled within the app."""
+    # When running as a bundled app, sys.executable is inside Contents/MacOS
+    # The bundled fswatch should be in the same directory.
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Running as a PyInstaller bundle
+        base_path = os.path.dirname(sys.executable)
+        fswatch_path = os.path.join(base_path, 'fswatch')
+        logging.debug(f"Checking for bundled fswatch at: {fswatch_path}")
+        return fswatch_path
+    else:
+        # Not running as a bundled app (e.g., running from source)
+        # In this case, rely on system PATH using shutil.which
+        logging.debug("Not running as a bundled app, checking system PATH for fswatch.")
+        return shutil.which("fswatch")
+
 def is_fswatch_available():
-    """Check if fswatch is installed on the system"""
-    logging.debug("Checking if fswatch is available")
-    try:
-        result = subprocess.run(
-            ["which", "fswatch"],
-            capture_output=True,
-            text=True,
-            check=False
-        )
-        available = result.returncode == 0
-        logging.debug(f"fswatch {'is' if available else 'is not'} available")
-        if available:
-            logging.debug(f"fswatch path: {result.stdout.strip()}")
-        return available
-    except Exception as e:
-        logging.error(f"Error checking fswatch availability: {e}")
+    """Check if fswatch is available, prioritizing the bundled version."""
+    logging.debug("Checking if fswatch is available (prioritizing bundled)...")
+    fswatch_path = _get_bundled_fswatch_path()
+
+    if fswatch_path and os.path.exists(fswatch_path) and os.access(fswatch_path, os.X_OK):
+        logging.info(f"fswatch is available and executable at: {fswatch_path}")
+        return True
+    else:
+        logging.warning(f"fswatch not found or not executable at expected path: {fswatch_path}")
+        # Optional: Add a fallback check on the system PATH if needed, but the primary
+        # expectation is that the bundled version works.
+        # system_path = shutil.which("fswatch")
+        # if system_path:
+        #    logging.warning(f"Bundled fswatch failed, but found on system PATH: {system_path}. Consider issues with bundling.")
+        #    # Decide if using system path is acceptable fallback
         return False
 
 

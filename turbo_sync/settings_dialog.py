@@ -151,6 +151,9 @@ QPushButton:pressed {
                 # Use QPlainTextEdit for multi-line options
                 "RCLONE_OPTIONS": ("Rclone Options:", QPlainTextEdit, "--progress --transfers=32 --checkers=64 --buffer-size=256M --bidir"),
             }),
+            ("Application Behavior", { # New Group Box
+                "START_AT_LOGIN": ("Start TurboSync at Login:", QCheckBox, False),
+            }),
         ])
 
         # --- Create Widgets Dynamically ---
