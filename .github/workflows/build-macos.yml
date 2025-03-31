@@ -33,9 +33,14 @@ jobs:
           # Ensure py2app is installed if not in requirements.txt
           pip install py2app
 
+      - name: Install fswatch and rclone
+        run: |
+          brew install fswatch
+          brew install rclone
+
       - name: Run build script
-        run: python build_app.py --non-interactive --install-fswatch # Execute build script non-interactively
-        
+        run: python build_app.py --non-interactive # Execute build script non-interactively (fswatch/rclone pre-installed)
+
       # Fix permissions on the app bundle to ensure it works correctly
       - name: Fix app permissions
         run: |

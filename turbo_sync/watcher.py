@@ -3,7 +3,7 @@ import time
 import logging
 import threading
 import subprocess
-from fswatch import Monitor
+# from fswatch import Monitor # Removed - Using subprocess directly
 from dotenv import load_dotenv
 
 # Use the root logger instead of a custom one to keep logging consistent
@@ -23,7 +23,7 @@ class FileWatcher:
         self.local_dir = os.path.expanduser(local_dir)
         self.callback = callback
         self.delay_seconds = delay_seconds
-        self.monitor = None
+        # self.monitor = None # Removed - Using subprocess directly
         self.watcher_thread = None
         self.running = False
         self.last_event_time = 0
@@ -90,16 +90,16 @@ class FileWatcher:
         
         try:
             logging.info(f"Starting file watcher for {self.local_dir}")
-            
-            # Create a monitor
-            logging.debug("Creating fswatch Monitor")
-            self.monitor = Monitor()
-            self.monitor.add_path(self.local_dir)
-            logging.debug(f"Added path to monitor: {self.local_dir}")
-            
-            # Set callback
-            self.monitor.set_callback(self._handle_event)
-            
+
+            # Removed Monitor creation/usage - using subprocess directly
+            # logging.debug("Creating fswatch Monitor")
+            # self.monitor = Monitor()
+            # self.monitor.add_path(self.local_dir)
+            # logging.debug(f"Added path to monitor: {self.local_dir}")
+            #
+            # # Set callback
+            # self.monitor.set_callback(self._handle_event)
+
             # Use alternative file watching approach instead of fswatch Monitor's built-in signal handling
             # This avoids the "signal only works in main thread" error
             logging.debug("Starting file watching through subprocess")
@@ -157,20 +157,21 @@ class FileWatcher:
         except Exception as e:
             logging.error(f"Error in file watcher subprocess: {str(e)}", exc_info=True)
             self.running = False
-    
-    def _watch_files(self):
-        """
-        Original implementation using Monitor.start() - not used due to signal issues
-        Kept for reference
-        """
-        try:
-            logging.debug("Watcher thread started, calling monitor.start()")
-            self.monitor.start()
-            logging.debug("Monitor.start() returned")
-        except Exception as e:
-            logging.error(f"File watcher error: {str(e)}", exc_info=True)
-            self.running = False
-    
+
+    # Removed unused _watch_files method which used the fswatch Python package Monitor
+    # def _watch_files(self):
+    #     """
+    #     Original implementation using Monitor.start() - not used due to signal issues
+    #     Kept for reference
+    #     """
+    #     try:
+    #         logging.debug("Watcher thread started, calling monitor.start()")
+    #         self.monitor.start()
+    #         logging.debug("Monitor.start() returned")
+    #     except Exception as e:
+    #         logging.error(f"File watcher error: {str(e)}", exc_info=True)
+    #         self.running = False
+
     def stop(self):
         """Stop watching for file changes"""
         if not self.running:
@@ -180,11 +181,12 @@ class FileWatcher:
         try:
             logging.info("Stopping file watcher")
             self.running = False
-            
-            if self.monitor:
-                logging.debug("Stopping monitor")
-                self.monitor = None
-            
+
+            # Removed monitor reference
+            # if self.monitor:
+            #     logging.debug("Stopping monitor")
+            #     self.monitor = None
+
             logging.info(f"File watcher stopped. Total events processed: {self.event_count}")
         except Exception as e:
             logging.error(f"Error stopping file watcher: {str(e)}", exc_info=True)

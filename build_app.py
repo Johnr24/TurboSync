@@ -8,56 +8,17 @@ import sys
 import shutil
 import subprocess
 import argparse
+import sys # Added sys import
 
-def check_fswatch(args):
-    """Check if fswatch is installed, offer to install if not (unless non-interactive)"""
-    try:
-        result = subprocess.run(
-            ["which", "fswatch"],
-            capture_output=True,
-            text=True,
-            check=False
-        )
-        fswatch_installed = result.returncode == 0
-
-        if not fswatch_installed:
-            print("\nfswatch is not installed, but recommended for file watching features.")
-            install_fswatch = args.install_fswatch
-            if not args.non_interactive:
-                response = input("Do you want to install fswatch using Homebrew? (y/n): ").strip().lower()
-                if response == 'y':
-                    install_fswatch = True
-                else:
-                    print("Skipping fswatch installation. File watching features will be disabled.")
-                    install_fswatch = False # Ensure it's false if user says no
-
-            if install_fswatch:
-                # Check if Homebrew is installed
-                try:
-                    subprocess.run(["brew", "--version"], capture_output=True, check=True)
-                    # Install fswatch
-                    print("Attempting to install fswatch via Homebrew...")
-                    subprocess.run(["brew", "install", "fswatch"], check=True)
-                    print("fswatch installed successfully!")
-                    fswatch_installed = True # Update status
-                except (subprocess.SubprocessError, FileNotFoundError):
-                    print("Error: Homebrew is not installed or installation failed.")
-                    if args.non_interactive:
-                        print("Cannot install fswatch automatically in non-interactive mode without Homebrew.")
-                    else:
-                         print("Please install Homebrew first:")
-                         print("  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"")
-                         print("Then run: brew install fswatch")
-                    print("File watching features may be limited.")
-            # else: # Already handled skipping message above if interactive
-               # if args.non_interactive: # If non-interactive and not installing
-                   # print("Skipping fswatch installation as requested/default.")
-
-        if fswatch_installed:
-             print("fswatch is installed. File watching features will be available.")
-
-    except Exception as e:
-        print(f"Error checking/installing fswatch: {str(e)}")
+def find_required_binary(name):
+    """Find a required binary on the system PATH and return its path."""
+    path = shutil.which(name)
+    if not path:
+        print(f"Error: Required binary '{name}' not found in system PATH.")
+        print(f"Please install '{name}' and ensure it's accessible in your PATH.")
+        sys.exit(1) # Exit if binary not found
+    print(f"Found '{name}' at: {path}")
+    return path
 
 def ensure_icon_exists():
     """Ensure the icon exists for the app"""
@@ -174,8 +135,11 @@ def build_app(args):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
 
-    # Check if fswatch is installed (pass args)
-    check_fswatch(args)
+    # Find required binaries needed for bundling
+    print("Locating required binaries (fswatch, rclone)...")
+    fswatch_path = find_required_binary("fswatch")
+    rclone_path = find_required_binary("rclone")
+    print("Required binaries located successfully.")
 
     # Make sure dependencies are installed
     subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
@@ -195,7 +159,10 @@ block_cipher = None
 a = Analysis(
     ['{os.path.join(script_dir, "turbo_sync", "main.py")}'],
     pathex=['{script_dir}'],
-    binaries=[],
+    binaries=[
+        ('{fswatch_path}', '.'), # Bundle fswatch into Contents/MacOS
+        ('{rclone_path}', '.'),  # Bundle rclone into Contents/MacOS
+    ],
     datas=[
         ('{os.path.join(script_dir, "turbo_sync", ".env.template")}', '.'), # Bundle the template from turbo_sync/
         ('{icon_path}', '.'),                                               # Include icon.png in the root
@@ -276,10 +243,11 @@ app = BUNDLE(
     with open(spec_file, 'w') as f:
         f.write(spec_content)
     
-    # Use PyInstaller with the spec file
-    pyinstaller_command = ["pyinstaller", spec_file]
-    if args.non_interactive:
-        pyinstaller_command.append("--noconfirm") # Add noconfirm flag if non-interactive
+    # Use PyInstaller with the spec file, always confirming removal of old build dirs
+    pyinstaller_command = ["pyinstaller", spec_file, "--noconfirm"]
+    # The --noconfirm flag is now always added, so the conditional check is removed.
+    # if args.non_interactive:
+    #     pyinstaller_command.append("--noconfirm") # Add noconfirm flag if non-interactive
     subprocess.run(pyinstaller_command, check=True)
 
     # Removed redundant copy of .env to dist folder
@@ -291,8 +259,8 @@ app = BUNDLE(
     # Fix permissions on the app in the dist folder
     fix_app_permissions(app_path)
 
-    # Install and launch only if interactive and requested
-    if not args.non_interactive:
+    # Install and launch only if interactive and requested, AND sudo install is not specified
+    if not args.non_interactive and not args.sudo_install:
         # Move app to Applications folder if requested
         install_response = input("Do you want to install TurboSync.app to your Applications folder? (y/n): ").strip().lower()
         if install_response == 'y':

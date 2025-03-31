@@ -6,7 +6,10 @@ block_cipher = None
 a = Analysis(
     ['/Users/john/Documents/TurboSync/turbo_sync/main.py'],
     pathex=['/Users/john/Documents/TurboSync'],
-    binaries=[],
+    binaries=[
+        ('/opt/homebrew/bin/fswatch', '.'), # Bundle fswatch into Contents/MacOS
+        ('/opt/homebrew/bin/rclone', '.'),  # Bundle rclone into Contents/MacOS
+    ],
     datas=[
         ('/Users/john/Documents/TurboSync/turbo_sync/.env.template', '.'), # Bundle the template from turbo_sync/
         ('/Users/john/Documents/TurboSync/turbo_sync/icon.png', '.'),                                               # Include icon.png in the root
