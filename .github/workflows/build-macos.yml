@@ -33,10 +33,11 @@ jobs:
           # Ensure py2app is installed if not in requirements.txt
           pip install py2app
 
-      - name: Install fswatch and rclone
+      - name: Install build tools (fswatch, rclone, create-dmg)
         run: |
           brew install fswatch
           brew install rclone
+          brew install create-dmg
 
       - name: Run build script
         run: python build_app.py --non-interactive # Execute build script non-interactively (fswatch/rclone pre-installed)
@@ -59,9 +60,9 @@ jobs:
           APP_NAME="TurboSync" # Or derive from setup.py if needed
           APP_PATH="dist/${APP_NAME}.app"
           TAG_NAME="${{ github.ref_name }}" # e.g., v0.1.0
-          ZIP_NAME="${APP_NAME}-${TAG_NAME}.zip"
+          DMG_NAME="${APP_NAME}-${TAG_NAME}.dmg" # Changed from ZIP_NAME
           echo "APP_PATH=${APP_PATH}" >> $GITHUB_OUTPUT
-          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_OUTPUT
+          echo "DMG_NAME=${DMG_NAME}" >> $GITHUB_OUTPUT # Changed from ZIP_NAME
           echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_OUTPUT
 
       - name: Check if App exists (for Release)
@@ -74,20 +75,28 @@ jobs:
             exit 1
           fi
 
-      - name: Zip the application bundle (for Release)
+      - name: Create DMG (for Release)
         if: startsWith(github.ref, 'refs/tags/') # Only run for tags
         run: |
-          echo "Zipping ${{ steps.vars.outputs.APP_PATH }} into ${{ steps.vars.outputs.ZIP_NAME }}"
-          # Zip using the relative path from the workspace root
-          zip -r "${{ steps.vars.outputs.ZIP_NAME }}" "${{ steps.vars.outputs.APP_PATH }}"
-          echo "Zip created: ${{ steps.vars.outputs.ZIP_NAME }}"
-          ls -l ${{ steps.vars.outputs.ZIP_NAME }}
+          echo "Creating DMG: ${{ steps.vars.outputs.DMG_NAME }} from ${{ steps.vars.outputs.APP_PATH }}"
+          create-dmg \
+            --volname "TurboSync ${{ steps.vars.outputs.TAG_NAME }}" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "TurboSync.app" 250 190 \
+            --hide-extension "TurboSync.app" \
+            --app-drop-link 540 185 \
+            "${{ steps.vars.outputs.DMG_NAME }}" \
+            "${{ steps.vars.outputs.APP_PATH }}"
+          echo "DMG created: ${{ steps.vars.outputs.DMG_NAME }}"
+          ls -l "${{ steps.vars.outputs.DMG_NAME }}"
 
       - name: Create Release and Upload Release Asset
         if: startsWith(github.ref, 'refs/tags/') # Only run for tags
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.vars.outputs.ZIP_NAME }}
+          files: ${{ steps.vars.outputs.DMG_NAME }} # Changed from ZIP_NAME to DMG_NAME
           tag_name: ${{ steps.vars.outputs.TAG_NAME }}
           name: Release ${{ steps.vars.outputs.TAG_NAME }}
           body: Automated release for ${{ steps.vars.outputs.TAG_NAME }}
