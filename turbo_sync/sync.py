@@ -13,14 +13,22 @@ if __name__ == "__main__":
 # Use root logger instead of configuring a separate one
 # This ensures compatibility with the logging setup in main.py
 logger = logging.getLogger(__name__)
+ 
+def load_config(dotenv_path=None):
+    """
+    Load configuration from .env file.
+    Prioritizes the file specified by dotenv_path if provided.
+    """
+    if dotenv_path and os.path.exists(dotenv_path):
+        logger.info(f"Loading configuration from specified path: {dotenv_path}")
+        load_dotenv(dotenv_path=dotenv_path, override=True)
+    else:
+        # Fallback to default behavior (searching current/parent dirs) if path not provided or doesn't exist
+        # This might be useful for development environments, but less so for the packaged app.
+        logger.warning(f"Specified dotenv_path '{dotenv_path}' not found or not provided. Falling back to default load_dotenv behavior.")
+        load_dotenv(override=True) # Original call
 
-def load_config():
-    """Load configuration from .env file"""
-    # Reload dotenv to ensure we get the latest values
-    load_dotenv(override=True)
-    
-    # Run a command to check the actual values loaded
-    logger.debug("Loading configuration from .env file with override=True")
+    logger.debug(f"Attempting to load configuration values after load_dotenv(override=True, path='{dotenv_path}')")
     logger.debug(f"RCLONE_OPTIONS from env: {os.getenv('RCLONE_OPTIONS')}")
     
     config = {

@@ -84,9 +84,12 @@ def ensure_env_file():
         try:
             # Find the bundled template file
             template_path = get_resource_path(".env.template")
-            if not os.path.exists(template_path):
-                 logging.error(f"Bundled .env.template not found at {template_path}")
+            logging.debug(f"Template path resolved to: {template_path}") # Log resolved path
+
+            if not template_path or not os.path.exists(template_path): # Check existence *before* copy
+                 logging.error(f"Bundled .env.template not found or path invalid: {template_path}")
                  # Fallback: Create a basic default if template is missing (should not happen)
+                 logging.warning("Creating basic default .env as template was missing.")
                  template_content = """# Remote server configuration (DEFAULT - TEMPLATE MISSING)
 REMOTE_USER=username
 REMOTE_HOST=example.com
@@ -119,8 +122,13 @@ PARALLEL_PROCESSES=4
                  logging.warning(f"Created basic default .env at {USER_ENV_PATH} as template was missing.")
             else:
                 # Copy the bundled template to the user config directory
+                logging.debug(f"Attempting to copy template from '{template_path}' to '{USER_ENV_PATH}'")
                 shutil.copy2(template_path, USER_ENV_PATH)
-                logging.info(f"Copied bundled template from {template_path} to {USER_ENV_PATH}")
+                # Verify copy by checking destination existence
+                if os.path.exists(USER_ENV_PATH):
+                    logging.info(f"Successfully copied template to {USER_ENV_PATH}")
+                else:
+                    logging.error(f"Copy attempted, but destination file still not found at {USER_ENV_PATH}")
 
             # REMOVED: os.system(f"open {USER_ENV_PATH}") - Settings are now handled via dialog
 
@@ -235,9 +243,12 @@ def check_dependencies():
 
 def main():
     """Main entry point for the application"""
+    print(">>> main() started", file=sys.stderr) # Early print
     try:
         # Set up logging
+        print(">>> Calling setup_logging()...", file=sys.stderr) # Early print
         log_file = setup_logging()
+        print(f">>> setup_logging() completed. Log file should be at: {log_file}", file=sys.stderr) # Early print
         
         try:
             # Log startup information
@@ -249,8 +260,11 @@ def main():
             # Note: The actual icon setting is handled within run_app (menubar.py)
             
             # Ensure .env file exists
-            if not ensure_env_file():
-                logging.warning("Setup incomplete - .env file needs configuration")
+            print(">>> Calling ensure_env_file()...", file=sys.stderr) # Early print
+            env_ok = ensure_env_file()
+            print(f">>> ensure_env_file() completed. Result: {env_ok}", file=sys.stderr) # Early print
+            if not env_ok:
+                logging.warning("Setup incomplete - .env file needs configuration or creation failed.")
                 return
             
             # Load environment variables from the user-specific path

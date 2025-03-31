@@ -86,8 +86,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
         # Load configuration
         try:
-            logging.debug("Loading configuration")
-            self.config = load_config()
+            logging.debug(f"Loading configuration using path: {USER_ENV_PATH}")
+            self.config = load_config(dotenv_path=USER_ENV_PATH) # Pass the path
+            if not self.config: # load_config might return None or raise error handled below
+                raise ValueError("load_config failed to return a valid configuration.")
             logging.info(f"Configuration loaded, sync interval: {self.config['sync_interval']} minutes")
             schedule.every(self.config['sync_interval']).minutes.do(self.scheduled_sync)
 
@@ -335,8 +337,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
             logging.debug("Updating status_item title...")
             self.status_item.title = f"Status: {self.last_sync_status}" # Rumps call
-            logging.debug("<<< Status_item title update attempted >>>") # ADDED THIS LINE
-            logging.debug("Status_item title updated.") # Original line moved down
+            logging.debug("Status_item title updated.")
 
             logging.debug("Setting self.syncing = False")
             self.syncing = False
@@ -500,8 +501,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             logging.info("Settings saved successfully.")
 
             # Reload config in the running app
-            logging.info("Reloading configuration after save.")
-            self.config = load_config()
+            logging.info(f"Reloading configuration after save using path: {USER_ENV_PATH}")
+            self.config = load_config(dotenv_path=USER_ENV_PATH) # Pass the path
+            if not self.config: # load_config might return None or raise error handled below
+                 raise ValueError("load_config failed to return a valid configuration after save.")
             logging.info(f"New sync interval: {self.config['sync_interval']} minutes")
 
             # Reschedule the sync job
