@@ -166,9 +166,19 @@ jobs:
             echo "No changes to commit to Homebrew formula."
           else
             git commit -m "Update turbosync formula to version ${{ steps.vars.outputs.TAG_NAME }}"
+            
+            echo "Attempting to push to Homebrew tap repository..."
+            echo "If this fails with a 403 error, please ensure your HOMEBREW_TAP_TOKEN has the 'repo' scope"
+            echo "with write access to the Johnr24/homebrew-turbosync repository."
+            
             # Push using the PAT embedded in the URL for authentication, exit on error
-            git push https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/Johnr24/homebrew-turbosync.git HEAD:main || exit 1
-            echo "Pushed updated formula to Johnr24/homebrew-turbosync"
+            git push https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/Johnr24/homebrew-turbosync.git HEAD:main || {
+              echo "ERROR: Failed to push to Homebrew tap repository."
+              echo "Please update your HOMEBREW_TAP_TOKEN with the 'repo' scope (full control of repositories)."
+              exit 1
+            }
+            
+            echo "Successfully pushed updated formula to Johnr24/homebrew-turbosync"
           fi
           cd .. # Change back to the original directory
 
