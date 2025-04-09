@@ -2,6 +2,7 @@ import os
 import subprocess
 import re # Import regex module
 import logging
+import shutil # Import shutil module
 from dotenv import load_dotenv
 import multiprocessing
 import time
