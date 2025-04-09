@@ -18,7 +18,7 @@ from collections import OrderedDict # To maintain setting order
 
 from turbo_sync.sync import perform_sync, load_config, find_livework_dirs # Absolute import, added find_livework_dirs
 from turbo_sync.watcher import FileWatcher, is_fswatch_available, get_fswatch_config # Absolute import
-import multiprocessing # Import multiprocessing for Queue
+import multiprocessing # Import multiprocessing for Queue and Manager
 import textwrap # For formatting long messages
 from turbo_sync.utils import get_resource_path # Import from utils
 # --- Import the Settings Dialog logic ---
@@ -70,7 +70,9 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.watch_enabled = False # Will be updated by setup_file_watcher
         self.last_sync_results = {} # Store detailed results {path: {'success': bool, 'synced_files': [], 'error': 'msg', 'error_type': 'optional_str'}}
         self.active_sync_progress = {} # Store current progress {path: percentage}
-        self.progress_queue = multiprocessing.Queue() # Queue for sync progress
+        # Use Manager().Queue() for inter-process communication with ProcessPoolExecutor
+        self.manager = multiprocessing.Manager()
+        self.progress_queue = self.manager.Queue() # Queue for sync progress
         self.progress_timer = None # Timer to check the queue
 
         # --- Define Items Needing State Management First ---
@@ -438,8 +440,15 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             # It ensures the status is always updated and syncing flag reset correctly.
             logging.debug(f"Scheduling final status update via timer with overall_success={overall_success}")
             try:
+                # Use functools.partial to pass data to the callback
+                update_callback = functools.partial(
+                    self._update_status_after_sync,
+                    overall_success,
+                    sync_message,
+                    sync_results
+                )
                 # Use a very short interval (e.g., 0.1s) just to defer execution to the main loop
-                rumps.Timer(self._update_status_after_sync, 0.1).start(timer_info=(overall_success, sync_message, sync_results))
+                rumps.Timer(update_callback, 0.1).start()
                 logging.debug("Timer scheduled for final status update.")
             except Exception as timer_e:
                 # If scheduling the timer fails, log the error.
@@ -452,20 +461,17 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         logging.debug("Sync task thread finishing.")
         # DO NOT update self.status_item.title or self.syncing here.
         # It will be handled by _update_status_after_sync on the main thread.
- 
-    def _update_status_after_sync(self, timer_info):
-        """Update status item, syncing flag, and project list on the main thread after sync."""
-        # timer_info is expected to be a tuple: (overall_success_status, sync_message_string, sync_results_dict_or_none)
-        if not isinstance(timer_info, tuple) or len(timer_info) != 3:
-             logging.error(f"Invalid timer_info received in _update_status_after_sync: {timer_info}")
-             # Attempt to reset syncing flag anyway
-             self.syncing = False
-             self.last_sync_results = None # Indicate error state
-             self.update_synced_projects_list() # Update list to show error
-             return
 
-        overall_success, sync_message, sync_results = timer_info # Unpack the data
-        self.last_sync_results = sync_results # Store the detailed results
+    def _update_status_after_sync(self, overall_success, sync_message, sync_results, timer):
+        """
+        Update status item, syncing flag, and project list on the main thread after sync.
+        Called via functools.partial, so arguments come first, then the timer object.
+        """
+        # Arguments overall_success, sync_message, sync_results are passed via partial
+        # 'timer' is the rumps.Timer object passed automatically to the callback
+
+        # Store the detailed results received from the sync task
+        self.last_sync_results = sync_results
 
         try:
             logging.debug(f"Timer callback: Updating status after sync (overall_success={overall_success})")
