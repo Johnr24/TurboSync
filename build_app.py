@@ -159,13 +159,13 @@ block_cipher = None
 a = Analysis(
     ['{os.path.join(script_dir, "turbo_sync", "main.py")}'],
     pathex=['{script_dir}'],
-    binaries=[
-        ('{fswatch_path}', 'Contents/MacOS'), # Explicitly target Contents/MacOS
-        ('{rsync_path}', 'Contents/MacOS'),   # Explicitly target Contents/MacOS
-    ],
+    binaries=[], # Keep binaries list empty for this test
     datas=[
         ('{os.path.join(script_dir, "turbo_sync", ".env.template")}', '.'), # Bundle the template from turbo_sync/
         ('{icon_path}', '.'),                                               # Include icon.png in the root
+        # --- Add binaries to datas section ---
+        ('{fswatch_path}', 'Contents/MacOS'), # Copy fswatch to Contents/MacOS
+        ('{rsync_path}', 'Contents/MacOS'),   # Copy rsync to Contents/MacOS
     ],
     hiddenimports=['plistlib', 'AppKit', 'Foundation', 'Cocoa', 'rumps', 'objc'],
     hookspath=[],
