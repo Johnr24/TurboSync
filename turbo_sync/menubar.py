@@ -18,6 +18,7 @@ from collections import OrderedDict # To maintain setting order
 
 from turbo_sync.sync import perform_sync, load_config, find_livework_dirs # Absolute import, added find_livework_dirs
 from turbo_sync.watcher import FileWatcher, is_fswatch_available, get_fswatch_config # Absolute import
+import multiprocessing # Import multiprocessing for Queue
 from turbo_sync.utils import get_resource_path # Import from utils
 # --- Import the Settings Dialog logic ---
 from turbo_sync.settings_dialog import launch_pyside_settings_dialog # Import the launcher function
@@ -67,6 +68,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.file_watcher = None
         self.watch_enabled = False # Will be updated by setup_file_watcher
         self.last_sync_results = {} # Store detailed results from last sync
+        self.progress_queue = multiprocessing.Queue() # Queue for sync progress
+        self.progress_timer = None # Timer to check the queue
 
         # --- Define Items Needing State Management First ---
         self.status_item = rumps.MenuItem(f"Status: {self.last_sync_status}")
@@ -288,25 +291,64 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.sync_thread = threading.Thread(target=self.perform_sync_task)
         self.sync_thread.start()
 
+    def _check_sync_progress(self, timer):
+        """Callback for the progress timer to check the queue."""
+        if not self.syncing:
+            logging.debug("Syncing stopped, stopping progress timer.")
+            if self.progress_timer:
+                self.progress_timer.stop()
+                self.progress_timer = None
+            return # Stop checking if sync is no longer active
+
+        try:
+            while not self.progress_queue.empty():
+                message = self.progress_queue.get_nowait()
+                if message and isinstance(message, dict):
+                    msg_type = message.get('type')
+                    project_name = message.get('project', 'Unknown Project')
+                    if msg_type == 'start':
+                        logging.info(f"Progress: Started syncing {project_name}")
+                        # Update status immediately - safe within timer callback on main thread
+                        self.status_item.title = f"Status: Syncing {project_name}..."
+                    elif msg_type == 'end':
+                        success_status = "successfully" if message.get('success') else "with errors"
+                        logging.info(f"Progress: Finished syncing {project_name} {success_status}")
+                        # Optionally update status here, or wait for final update
+                        # self.status_item.title = f"Status: Finished {project_name}"
+        except multiprocessing.queues.Empty:
+            pass # Queue is empty, nothing to do
+        except Exception as e:
+            logging.error(f"Error checking progress queue: {e}")
+
     def perform_sync_task(self):
         """Run the sync in a separate thread and schedule UI updates."""
         logging.debug("Starting sync task")
         self.syncing = True
+
+        # Start the progress checking timer (runs every 0.5 seconds)
+        if self.progress_timer is None:
+             logging.debug("Starting progress timer.")
+             self.progress_timer = rumps.Timer(self._check_sync_progress, 0.5)
+             self.progress_timer.start()
+        else:
+             logging.warning("Progress timer already exists, not starting again.")
+
+
         # Initial status update (safe from background thread before long operation)
         try:
-            self.status_item.title = "Status: Syncing..."
+            self.status_item.title = "Status: Starting sync..." # More generic start message
         except Exception as ui_err:
             # Log if the initial status update fails, but proceed with sync
-            logging.error(f"Failed to set initial 'Syncing...' status: {ui_err}")
+            logging.error(f"Failed to set initial 'Starting sync...' status: {ui_err}")
 
         overall_success = False # Default overall status
         sync_results = None # Store detailed results here
         sync_message = "Sync did not run or failed unexpectedly." # Default message for overall status
 
         try:
-            # --- Call the core sync logic ---
-            logging.debug("Calling perform_sync()...")
-            sync_results = perform_sync() # Get detailed results (dict or None)
+            # --- Call the core sync logic, passing the queue ---
+            logging.debug("Calling perform_sync() with progress queue...")
+            sync_results = perform_sync(progress_queue=self.progress_queue) # Pass the queue
             logging.debug(f"perform_sync() returned: {sync_results}")
 
             # Determine overall success and message based on detailed results
@@ -421,10 +463,19 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             self.syncing = False
             logging.debug("Timer callback: Status update complete.")
 
+            # Stop the progress timer now that sync is finished
+            if self.progress_timer:
+                logging.debug("Stopping progress timer.")
+                self.progress_timer.stop()
+                self.progress_timer = None
+
         except Exception as e:
             logging.exception(f"Exception during timer-based status update: {e}")
-            # Attempt to set syncing to False even if status update fails
+            # Attempt to set syncing to False and stop timer even if status update fails
             self.syncing = False
+            if self.progress_timer:
+                self.progress_timer.stop()
+                self.progress_timer = None
             self.last_sync_results = None # Indicate error state
             self.update_synced_projects_list() # Update list to show error
 
