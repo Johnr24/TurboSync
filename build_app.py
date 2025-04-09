@@ -160,8 +160,8 @@ a = Analysis(
     ['{os.path.join(script_dir, "turbo_sync", "main.py")}'],
     pathex=['{script_dir}'],
     binaries=[
-        ('{fswatch_path}', '.'), # Bundle fswatch into Contents/MacOS
-        ('{rsync_path}', '.'),   # Bundle rsync into Contents/MacOS
+        ('{fswatch_path}', 'Contents/MacOS'), # Explicitly target Contents/MacOS
+        ('{rsync_path}', 'Contents/MacOS'),   # Explicitly target Contents/MacOS
     ],
     datas=[
         ('{os.path.join(script_dir, "turbo_sync", ".env.template")}', '.'), # Bundle the template from turbo_sync/
