@@ -19,6 +19,7 @@ from collections import OrderedDict # To maintain setting order
 from turbo_sync.sync import perform_sync, load_config, find_livework_dirs # Absolute import, added find_livework_dirs
 from turbo_sync.watcher import FileWatcher, is_fswatch_available, get_fswatch_config # Absolute import
 import multiprocessing # Import multiprocessing for Queue
+import textwrap # For formatting long messages
 from turbo_sync.utils import get_resource_path # Import from utils
 # --- Import the Settings Dialog logic ---
 from turbo_sync.settings_dialog import launch_pyside_settings_dialog # Import the launcher function
@@ -67,7 +68,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.last_sync_status = "Never synced"
         self.file_watcher = None
         self.watch_enabled = False # Will be updated by setup_file_watcher
-        self.last_sync_results = {} # Store detailed results from last sync
+        self.last_sync_results = {} # Store detailed results {path: {'success': bool, 'synced_files': [], 'error': 'msg', 'error_type': 'optional_str'}}
+        self.active_sync_progress = {} # Store current progress {path: percentage}
         self.progress_queue = multiprocessing.Queue() # Queue for sync progress
         self.progress_timer = None # Timer to check the queue
 
@@ -310,11 +312,31 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                         logging.info(f"Progress: Started syncing {project_name}")
                         # Update status immediately - safe within timer callback on main thread
                         self.status_item.title = f"Status: Syncing {project_name}..."
+                    elif msg_type == 'progress':
+                        percentage = message.get('percentage')
+                        path = message.get('path')
+                        if path is not None and percentage is not None:
+                            logging.debug(f"Progress Update: {project_name} at {percentage}%")
+                            self.active_sync_progress[path] = percentage
+                            # Update the submenu to reflect the new percentage
+                            self.update_synced_projects_list() # Update UI immediately
                     elif msg_type == 'end':
-                        success_status = "successfully" if message.get('success') else "with errors"
+                        path = message.get('path')
+                        success = message.get('success') # Get success status from message
+                        success_status = "successfully" if success else "with errors"
                         logging.info(f"Progress: Finished syncing {project_name} {success_status}")
-                        # Optionally update status here, or wait for final update
-                        # self.status_item.title = f"Status: Finished {project_name}"
+                        # Remove from active progress (end message means sync process for this dir finished)
+                        if path in self.active_sync_progress:
+                            del self.active_sync_progress[path]
+                        # NOTE: The final result dict (with files/errors) is now aggregated in perform_sync
+                        # and stored in self.last_sync_results after the sync thread finishes.
+                        # We just need to trigger a UI update here to show the final state icon (✅/❌/etc.)
+                        # We can temporarily store the simple success/fail here if needed for immediate UI update,
+                        # but it will be overwritten by the full results later.
+                        # Let's rely on update_synced_projects_list() being called after perform_sync finishes.
+                        # Triggering an update here ensures the percentage disappears.
+                        self.update_synced_projects_list()
+
         except multiprocessing.queues.Empty:
             pass # Queue is empty, nothing to do
         except Exception as e:
@@ -529,33 +551,72 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             self.synced_projects_item.title = f"Synced Projects ({count})" # Update title with count
             if count > 0:
                 for dir_path in livework_dirs:
-                    item_title = os.path.basename(dir_path)
-                    # Check status from the last sync results
-                    sync_status = None
-                    if isinstance(self.last_sync_results, dict):
-                        sync_status = self.last_sync_results.get(dir_path) # Get status for this dir
+                    base_name = os.path.basename(dir_path)
+                    item_title = base_name # Start with base name
 
-                    project_item = rumps.MenuItem(item_title) # Default item
+                    # 1. Check if currently syncing (highest priority)
+                    if dir_path in self.active_sync_progress:
+                        percentage = self.active_sync_progress[dir_path]
+                        item_title = f"{base_name} ({percentage}%)"
+                        project_item = rumps.MenuItem(item_title) # Create item with progress
 
-                    if isinstance(sync_status, dict): # Check if it's an error dictionary
-                        if sync_status.get('error') == 'lock_file':
-                            item_title = f"⚠️ {item_title}" # Prepend error indicator
-                            project_item.title = item_title
-                            lock_file_path = sync_status.get('path')
-                            if lock_file_path:
-                                # Create submenu item with callback using partial
-                                action_item = rumps.MenuItem("Remove Lock File & Retry Sync")
-                                action_item.set_callback(functools.partial(self._remove_lock_file_and_retry, lock_file_path=lock_file_path))
-                                project_item.add(action_item) # Add action as submenu
-                        elif sync_status.get('error') == 'other':
-                             item_title = f"❓ {item_title}" # Prepend unknown/error indicator
+                    # 2. Else, check last sync result details for this specific path
+                    elif isinstance(self.last_sync_results, dict) and dir_path in self.last_sync_results:
+                        result_data = self.last_sync_results[dir_path]
+                        project_item = rumps.MenuItem(base_name) # Create item first
+
+                        if isinstance(result_data, dict): # Should always be a dict now
+                            if result_data.get('success') is True:
+                                item_title = f"✅ {base_name}"
+                                project_item.title = item_title
+                                # Add "View Synced Files" submenu if files exist
+                                synced_files = result_data.get('synced_files', [])
+                                if synced_files:
+                                     files_item = rumps.MenuItem(f"View {len(synced_files)} Synced File(s)")
+                                     # Pass the list of files to the callback
+                                     files_item.set_callback(functools.partial(self._show_synced_files, project_name=base_name, files=synced_files))
+                                     project_item.add(files_item)
+                                else:
+                                     project_item.add(rumps.MenuItem("No files transferred"))
+
+                            elif result_data.get('success') is False:
+                                error_msg = result_data.get('error', 'Unknown error')
+                                # Check for specific error types if implemented (e.g., lock file)
+                                if result_data.get('error_type') == 'lock_file': # Example check
+                                     item_title = f"⚠️ {base_name}" # Lock indicator
+                                     project_item.title = item_title
+                                     lock_file_path = result_data.get('path') # Assuming path is stored for lock errors
+                                     if lock_file_path:
+                                         action_item = rumps.MenuItem("Remove Lock File & Retry Sync")
+                                         action_item.set_callback(functools.partial(self._remove_lock_file_and_retry, lock_file_path=lock_file_path))
+                                         project_item.add(action_item)
+                                     # Also add view error for lock files
+                                     error_item = rumps.MenuItem("View Error")
+                                     error_item.set_callback(functools.partial(self._show_error_message, project_name=base_name, error=error_msg))
+                                     project_item.add(error_item)
+                                else: # General failure
+                                     item_title = f"❌ {base_name}" # Failure indicator
+                                     project_item.title = item_title
+                                     # Add "View Error" submenu
+                                     error_item = rumps.MenuItem("View Error")
+                                     # Pass the error message to the callback
+                                     error_item.set_callback(functools.partial(self._show_error_message, project_name=base_name, error=error_msg))
+                                     project_item.add(error_item)
+                        else:
+                             # Should not happen if sync.py returns dicts, but handle defensively
+                             item_title = f"❓ {base_name}" # Unknown status indicator
                              project_item.title = item_title
-                    elif self.last_sync_results is None and count > 0: # General sync error (e.g., config)
-                        # Indicate general sync error if results are None but dirs were found
-                        item_title = f"❓ {item_title}" # Prepend unknown/error indicator
-                        project_item.title = item_title
 
-                    self.synced_projects_item.add(project_item) # Add the potentially modified item
+                    # 3. Else, check for general sync error state (last_sync_results is None but dirs exist)
+                    elif self.last_sync_results is None and count > 0:
+                        item_title = f"❓ {base_name}" # Prepend general error indicator
+                        project_item = rumps.MenuItem(item_title)
+
+                    # 4. Default: Just show the name (e.g., first run, or sync hasn't touched this dir)
+                    else:
+                        project_item = rumps.MenuItem(item_title) # Item with just the base name
+
+                    self.synced_projects_item.add(project_item) # Add the constructed item
             else:
                 self.synced_projects_item.add(rumps.MenuItem("No projects found"))
         except Exception as e:
@@ -596,6 +657,48 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         except Exception as e:
             logging.exception(f"Unexpected error removing lock file '{lock_file_path}': {e}")
             rumps.notification("TurboSync Error", "Failed to Remove Lock File", f"Unexpected error: {e}")
+
+    # --- Callbacks for Details Submenu ---
+    def _show_synced_files(self, project_name, files, sender=None):
+        """Displays the list of synced files in a rumps alert."""
+        logging.info(f"Showing synced files for project: {project_name}")
+        if not files:
+            message = "No files were reported as transferred in the last sync."
+        else:
+            # Join files with newline, limit total length for alert box
+            message = "Files transferred:\n\n" + "\n".join(files)
+            if len(message) > 800: # Limit message size for alert
+                 message = message[:797] + "...\n\n(List truncated)"
+
+        # Use rumps.alert for a simple modal display
+        try:
+             # Ensure this runs on the main thread if called from background
+             # (though callbacks usually run on main thread in rumps)
+             rumps.alert(title=f"Synced Files: {project_name}", message=message, ok="OK")
+        except Exception as e:
+             logging.error(f"Failed to show synced files alert: {e}")
+             # Fallback notification
+             rumps.notification("TurboSync", f"Synced Files: {project_name}", f"{len(files)} files transferred.")
+
+    def _show_error_message(self, project_name, error, sender=None):
+        """Displays the sync error message in a rumps alert."""
+        logging.info(f"Showing error for project: {project_name}")
+        # Format the error message nicely
+        message = f"An error occurred while syncing '{project_name}':\n\n"
+        # Wrap long lines for better readability in the alert box
+        wrapped_error = textwrap.fill(str(error), width=70) # Ensure error is string, adjust width as needed
+        message += wrapped_error
+        if len(message) > 800: # Limit message size
+             message = message[:797] + "...\n\n(Error message truncated)"
+
+        try:
+             # Ensure this runs on the main thread
+             rumps.alert(title=f"Sync Error: {project_name}", message=message, ok="OK")
+        except Exception as e:
+             logging.error(f"Failed to show error alert: {e}")
+             # Fallback notification
+             rumps.notification("TurboSync Error", f"Error syncing {project_name}", str(error)[:100]) # Show truncated error
+    # --- End Callbacks ---
 
     def _get_app_path(self):
         """Determines the path to the running application bundle (.app)."""

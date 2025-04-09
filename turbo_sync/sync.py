@@ -302,9 +302,14 @@ def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None)
     # Use shlex to split options correctly, handling quotes
     try:
         import shlex
-        rsync_opts_list = shlex.split(rsync_opts_str)
+        # Add progress flags, itemize changes, and --no-i-r
+        # -i (--itemize-changes) gives per-file output
+        # --info=progress2 gives machine-readable progress
+        # --no-i-r recommended with progress2
+        rsync_opts_list = shlex.split(rsync_opts_str) + ['--info=progress2', '--no-i-r', '-i']
     except ImportError:
-        rsync_opts_list = rsync_opts_str.split() # Fallback for environments without shlex
+        # Fallback for environments without shlex
+        rsync_opts_list = rsync_opts_str.split() + ['--info=progress2', '--no-i-r', '-i']
 
     rsync_cmd = [rsync_executable] + rsync_opts_list
 
@@ -343,32 +348,124 @@ def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None)
     # --- End Report Start ---
 
     success = False # Default to failure
+    synced_files = [] # List to store transferred files
+    error_message = "" # Store specific error message
+    process = None
     try:
-        # Run rsync
-        result = subprocess.run(
+        # Use Popen to stream output
+        logger.debug(f"Starting Popen for: {' '.join(rsync_cmd)}")
+        process = subprocess.Popen(
             rsync_cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, # Capture stderr too
             text=True,
-            check=True, # Raise exception on non-zero exit code
+            bufsize=1,  # Line buffered
             env=os.environ.copy()
         )
-        logger.info(f"Successfully synced {remote_path} -> {local_path}")
-        if result.stdout:
-            logger.debug(f"rsync output for {remote_path}:\n{result.stdout}")
-        if result.stderr:
-            # rsync often uses stderr for stats/errors, log it
-            logger.debug(f"rsync stderr for {remote_path}:\n{result.stderr}")
-        success = True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Rsync failed for {remote_path} -> {local_path}. Exit Code: {e.returncode}")
-        logger.error(f"Command: {' '.join(e.cmd)}")
-        logger.error(f"Stderr: {e.stderr}")
-        logger.error(f"Stdout: {e.stdout}")
-        success = False
+
+        # Regexes for parsing output
+        # Progress: "         32768   0% ..." or "   131072000  99% ..."
+        progress_regex = re.compile(r'\s+(\d+)%\s+')
+        # Itemize changes: ">f+++++++++ filename" (sent), "<f.st...... filename" (deleted), ".d..t...... dirname/" (dir properties)
+        # We only care about sent/updated files (lines starting with >f)
+        itemize_regex = re.compile(r'^>f[+.]') # Matches files being sent or updated locally
+        last_reported_percentage = -1
+
+        # Read stdout line by line
+        logger.debug(f"Reading stdout for {project_name}...")
+        if process.stdout:
+            while True:
+                # Check if process has terminated before reading line
+                if process.poll() is not None and process.stdout.peek(1) == b'':
+                     logger.debug(f"Process terminated and stdout empty for {project_name}, breaking read loop.")
+                     break
+
+                line = process.stdout.readline()
+                if not line:
+                    # If readline returns empty but process is still running, wait briefly
+                    if process.poll() is None:
+                        time.sleep(0.05) # Small sleep to avoid busy-waiting
+                        continue
+                    else:
+                        logger.debug(f"End of stdout stream for {project_name}.")
+                        break # End of stream and process finished
+
+                line_strip = line.strip()
+                if not line_strip: # Skip empty lines
+                    continue
+
+                logger.debug(f"rsync raw ({project_name}): {line_strip}") # Log raw output for debugging
+
+                # Check for progress update
+                progress_match = progress_regex.search(line)
+                if progress_match:
+                    percentage = int(progress_match.group(1))
+                    # Only report if percentage changes to avoid flooding the queue
+                    if percentage != last_reported_percentage:
+                        logger.debug(f"Parsed progress for {project_name}: {percentage}%")
+                        if progress_queue:
+                            try:
+                                progress_queue.put({
+                                    'type': 'progress',
+                                    'project': project_name,
+                                    'path': remote_path,
+                                    'percentage': percentage
+                                })
+                                last_reported_percentage = percentage
+                            except Exception as q_err:
+                                logger.error(f"Failed to put progress message on queue for {project_name}: {q_err}")
+                    continue # Progress lines don't contain itemize info
+
+                # Check for itemized change (file transfer)
+                # Example: >f+++++++++ my_document.txt
+                if itemize_regex.match(line):
+                    # Extract filename (part after the 11-char code and space)
+                    filename = line[12:].strip()
+                    if filename:
+                        synced_files.append(filename)
+                        logger.debug(f"Tracked synced file for {project_name}: {filename}")
+
+        # Wait for the process to finish and get the exit code and stderr
+        logger.debug(f"Waiting for rsync process to complete for {project_name}...")
+        stdout_final, stderr_final = process.communicate() # Get any remaining output/errors
+        return_code = process.returncode
+        logger.debug(f"Rsync process for {project_name} finished with code: {return_code}")
+
+        # Log any final stderr output
+        if stderr_final:
+            stderr_final_strip = stderr_final.strip()
+            logger.debug(f"rsync final stderr for {remote_path}:\n{stderr_final_strip}")
+            # Store stderr as potential error message, unless it's just stats
+            # (rsync often prints stats to stderr even on success)
+            if return_code != 0 or "total size is" not in stderr_final_strip:
+                 error_message = stderr_final_strip
+
+        if return_code == 0:
+            logger.info(f"Successfully synced {remote_path} -> {local_path}")
+            success = True
+        else:
+            logger.error(f"Rsync failed for {remote_path} -> {local_path}. Exit Code: {return_code}")
+            logger.error(f"Command: {' '.join(rsync_cmd)}") # Log the command used
+            # Use captured stderr if available, otherwise provide generic message
+            if not error_message:
+                 error_message = f"Rsync failed with exit code {return_code}."
+            logger.error(f"Error details: {error_message}")
+            success = False
+
     except Exception as e:
         logger.error(f"Unexpected error during rsync {remote_path} -> {local_path}: {str(e)}")
         logger.exception("Traceback:")
         success = False
+        error_message = f"Unexpected Python error: {str(e)}" # Store Python exception message
+        # Ensure process is terminated if it's still running after an exception
+        if process and process.poll() is None:
+            try:
+                logger.warning(f"Terminating runaway rsync process for {project_name} due to exception.")
+                process.terminate()
+                process.wait(timeout=5) # Wait a bit for termination
+            except:
+                logger.warning(f"Force killing runaway rsync process for {project_name}.")
+                process.kill() # Force kill if terminate fails
     finally:
         # --- Report End ---
         if progress_queue:
@@ -378,7 +475,19 @@ def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None)
                 logger.error(f"Failed to put end message on queue for {project_name}: {q_err}")
         # --- End Report End ---
 
-    return (remote_path, success) # Return path and final success status
+    # Return detailed result dictionary
+    result_data = {'success': success}
+    if success:
+        result_data['synced_files'] = synced_files
+    else:
+        result_data['error'] = error_message
+        # TODO: Add more robust lock file detection here if needed based on error_message
+        # Example basic check (might need refinement):
+        # if "lock file" in error_message.lower():
+        #    result_data['error_type'] = 'lock_file'
+        #    result_data['path'] = remote_path # Assuming path needed for lock removal
+
+    return (remote_path, result_data) # Return path and result dictionary
 
 def perform_sync(progress_queue=None):
     """
