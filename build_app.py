@@ -243,10 +243,7 @@ app = BUNDLE(
         f.write(spec_content)
     
     # Use PyInstaller with the spec file, always confirming removal of old build dirs
-    pyinstaller_command = ["pyinstaller", spec_file, "--noconfirm"]
-    # The --noconfirm flag is now always added, so the conditional check is removed.
-    # if args.non_interactive:
-    #     pyinstaller_command.append("--noconfirm") # Add noconfirm flag if non-interactive
+    pyinstaller_command = ["pyinstaller", spec_file, "--noconfirm"] # --noconfirm prevents prompts
     subprocess.run(pyinstaller_command, check=True)
 
     # Removed redundant copy of .env to dist folder
@@ -259,36 +256,15 @@ app = BUNDLE(
     # Permissions are now handled comprehensively in the GitHub Actions workflow
     # fix_app_permissions(app_path)
 
-    # Install and launch only if interactive and requested, AND sudo install is not specified
-    if not args.non_interactive and not args.sudo_install:
-        # Move app to Applications folder if requested
-        install_response = input("Do you want to install TurboSync.app to your Applications folder? (y/n): ").strip().lower()
-        if install_response == 'y':
-            app_path = os.path.join(script_dir, "dist", "TurboSync.app")
-            applications_path = "/Applications/TurboSync.app"
+    # Interactive install/launch prompts removed. Use --sudo-install for installation.
+    print("Build finished. Use --sudo-install flag to install to /Applications.")
 
-            # Remove existing app if it exists
-            if os.path.exists(applications_path):
-                print(f"Removing existing app at {applications_path}...")
-                shutil.rmtree(applications_path)
-
-            # Copy the app
-            print(f"Installing app to {applications_path}...")
-            shutil.copytree(app_path, applications_path)
-            print(f"TurboSync app installed to {applications_path}")
-            
-            # Fix permissions and remove quarantine flag
-            fix_app_permissions(applications_path)
-            
-            # Ask to launch the app
-            launch_response = input("Do you want to launch TurboSync now? (y/n): ").strip().lower()
-            if launch_response == 'y':
-                print("Launching TurboSync...")
-                subprocess.run(["open", applications_path])
-    else:
-        print("Skipping installation and launch prompts in non-interactive mode.")
-
-
+    # Launch the app if requested via flag
+    if args.launch:
+        print("Launching TurboSync from build directory...")
+        app_path_to_launch = os.path.join(script_dir, "dist", "TurboSync.app")
+        if os.path.exists(app_path_to_launch):
+            subprocess.run(["open", app_path_to_launch])
 def install_with_sudo(app_path, applications_path):
     """Install the app to the Applications folder using sudo to avoid permission issues"""
     print(f"Installing {app_path} to {applications_path} using sudo...")
@@ -319,20 +295,12 @@ def install_with_sudo(app_path, applications_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build the TurboSync macOS app.")
     parser.add_argument(
-        '--non-interactive',
-        action='store_true',
-        help='Run in non-interactive mode, suppressing prompts and using defaults or flags.'
-    )
-    parser.add_argument(
         '--install-fswatch',
         action='store_true',
         help='Attempt to install fswatch using Homebrew if not found (requires Homebrew). Only effective in non-interactive mode if Homebrew is present.'
     )
-    parser.add_argument(
-        '--sudo-install',
-        action='store_true',
-        help='Install app to /Applications using sudo (avoids permission issues)'
-    )
+    parser.add_argument('--sudo-install', action='store_true', help='Install app to /Applications using sudo (avoids permission issues)')
+    parser.add_argument('--launch', action='store_true', help='Launch the app from the dist directory after building.')
     # Add flags for install/launch if needed for non-interactive local use,
     # but typically not desired for CI.
     # parser.add_argument('--install-app', action='store_true', help='Install app to /Applications (non-interactive).')

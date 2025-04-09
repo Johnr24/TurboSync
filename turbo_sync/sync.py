@@ -1,5 +1,6 @@
 import os
 import subprocess
+import re # Import regex module
 import logging
 from dotenv import load_dotenv
 import multiprocessing
@@ -252,7 +253,14 @@ def list_remote_directory(config):
             return False
 
 def sync_directory(remote_path, local_base_dir, config):
-    """Sync a specific remote directory to local using rclone bisync"""
+    """
+    Sync a specific remote directory to local using rclone bisync.
+
+    Returns:
+        True: If sync (or resync) was successful.
+        dict: {'error': 'lock_file', 'path': lock_file_path} if a lock file error occurred.
+        dict: {'error': 'other'} if any other sync error occurred.
+    """
     # Calculate the relative path from the remote_dir
     base_path = config['mounted_path']
     if remote_path == base_path:
@@ -319,6 +327,16 @@ def sync_directory(remote_path, local_base_dir, config):
         logger.error(f"Stderr: {e.stderr}")
         logger.error(f"Stdout: {e.stdout}")
 
+        # --- Check for specific lock file error ---
+        lock_file_match = re.search(r'prior lock file found:.*?rclone deletefile "(.*?)"', e.stderr, re.DOTALL)
+        if lock_file_match:
+            lock_file_path = lock_file_match.group(1)
+            logger.warning(f"Detected bisync lock file: {lock_file_path}")
+            # Return specific error info for lock file
+            return {'error': 'lock_file', 'path': lock_file_path}
+        # --- End lock file check ---
+
+
         # Check if exit code 9 or 7 indicates a resync is needed
         if e.returncode == 9 or e.returncode == 7:
             logger.warning(f"Bisync exited with code {e.returncode}. Attempting --resync...")
@@ -344,36 +362,42 @@ def sync_directory(remote_path, local_base_dir, config):
             except subprocess.CalledProcessError as resync_e:
                 logger.error(f"Bisync --resync attempt failed for {remote_path} <--> {local_path}. Exit Code: {resync_e.returncode}")
                 logger.error(f"Resync Command: {' '.join(resync_e.cmd)}")
-                logger.error(f"Resync Stderr: {resync_e.stderr}")
+                logger.error(f"Resync Stderr: {resync_e.stderr}") # Log stderr for resync failure too
                 logger.error(f"Resync Stdout: {resync_e.stdout}")
-                return False
+                return {'error': 'other'} # Indicate general failure after resync attempt
             except Exception as resync_ex:
                  logger.error(f"Unexpected error during bisync --resync attempt for {remote_path} <--> {local_path}: {str(resync_ex)}")
                  logger.exception("Resync Traceback:")
-                 return False
+                 return {'error': 'other'} # Indicate general failure
         else:
             # Error was not exit code 9 or 7, return False without retrying
             logger.error(f"Bisync failed with unrecoverable exit code {e.returncode}. Not attempting resync.")
-            return False
+            return {'error': 'other'} # Indicate general failure
     except Exception as e:
         logger.error(f"Unexpected error during initial bisync {remote_path} <--> {local_path}: {str(e)}")
         logger.exception("Traceback:") # Log full traceback for unexpected errors
-        return False
+        return {'error': 'other'} # Indicate general failure
 
 def perform_sync():
-    """Main function to perform the synchronization using rclone bisync sequentially"""
+    """
+    Main function to perform the synchronization using rclone bisync sequentially.
+
+    Returns:
+        dict: A dictionary mapping remote directory paths to their sync status (True for success, False for failure).
+              Returns None if a configuration error or major exception occurs before syncing starts.
+    """
     try:
         config = load_config()
 
         # Ensure we're using mounted volume (bisync requires accessible paths)
         if not config.get('is_mounted', False):
             logger.error("Mounted volume not found or not configured. bisync requires direct access.")
-            return False, "Mounted volume not available for bisync."
+            return None # Indicate general failure
 
         # Ensure mounted path is accessible
         if not os.path.exists(config['mounted_path']):
             logger.error(f"Mounted path not accessible: {config['mounted_path']}")
-            return False, f"Mounted path not accessible: {config['mounted_path']}"
+            return None # Indicate general failure
 
         # List mounted directory contents (for debugging/confirmation)
         # list_remote_directory(config) # Optional: uncomment if needed for debugging
@@ -389,36 +413,31 @@ def perform_sync():
 
         if not livework_dirs:
             logger.warning("No .livework directories found to sync.")
-            # Decision: Do we sync the root mount <-> local_dir if no .livework?
-            # For now, sticking to the established .livework logic.
-            return False, "No .livework directories found to sync"
+            # Return an empty dict as no syncs were attempted/failed.
+            return {}
 
         # Sync each directory sequentially using bisync
         logger.info(f"Found {len(livework_dirs)} directories containing .livework to bisync sequentially.")
-        successful_syncs = 0
+        sync_results = {} # Dictionary to store results per directory
         total_dirs = len(livework_dirs)
 
         for i, remote_dir in enumerate(livework_dirs):
             logger.info(f"--- Starting bisync for directory {i+1}/{total_dirs}: {remote_dir} ---")
-            if sync_directory(remote_dir, config['local_dir'], config):
-                successful_syncs += 1
-            else:
+            result = sync_directory(remote_dir, config['local_dir'], config)
+            sync_results[remote_dir] = result # Store result (True or dict)
+            if result is not True: # Check if it's not success (could be error dict)
                 # Log failure for this specific directory but continue with others
                 logger.warning(f"Bisync failed for directory: {remote_dir}. Continuing with next.")
             logger.info(f"--- Finished bisync for directory {i+1}/{total_dirs}: {remote_dir} ---")
 
-
-        logger.info(f"Sequential bisync completed. {successful_syncs}/{total_dirs} directories attempted.")
-        # Report overall success only if all directories succeeded.
-        if successful_syncs == total_dirs:
-             return True, f"Bisynced {successful_syncs}/{total_dirs} directories successfully."
-        else:
-             return False, f"Bisync completed with {total_dirs - successful_syncs} failures out of {total_dirs} directories."
+        successful_syncs = sum(1 for success in sync_results.values() if success)
+        logger.info(f"Sequential bisync completed. {successful_syncs}/{total_dirs} directories synced successfully.")
+        return sync_results # Return the dictionary of results
 
     except ValueError as e: # Catch config loading errors
         logger.error(f"Configuration error during sync process: {str(e)}")
-        return False, f"Configuration error: {str(e)}"
+        return None # Indicate general failure
     except Exception as e:
         logger.error(f"Unexpected error during perform_sync: {str(e)}")
         logger.exception("Traceback:") # Log full traceback
-        return False, f"Sync failed due to unexpected error: {str(e)}"
+        return None # Indicate general failure
