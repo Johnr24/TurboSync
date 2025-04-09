@@ -4,6 +4,7 @@ import functools # Import functools for partial
 import time
 import threading
 import logging
+import shutil # Import shutil
 import rumps
 import subprocess # Added for AppleScript execution
 # Removed explicit component imports for rumps 0.4.0
