@@ -136,9 +136,9 @@ def build_app(args):
     os.chdir(script_dir)
 
     # Find required binaries needed for bundling
-    print("Locating required binaries (fswatch, rclone)...")
+    print("Locating required binaries (fswatch, rsync)...") # Changed rclone to rsync
     fswatch_path = find_required_binary("fswatch")
-    rclone_path = find_required_binary("rclone")
+    rsync_path = find_required_binary("rsync") # Changed rclone to rsync
     print("Required binaries located successfully.")
 
     # Make sure dependencies are installed
@@ -161,7 +161,7 @@ a = Analysis(
     pathex=['{script_dir}'],
     binaries=[
         ('{fswatch_path}', '.'), # Bundle fswatch into Contents/MacOS
-        ('{rclone_path}', '.'),  # Bundle rclone into Contents/MacOS
+        ('{rsync_path}', '.'),   # Bundle rsync into Contents/MacOS
     ],
     datas=[
         ('{os.path.join(script_dir, "turbo_sync", ".env.template")}', '.'), # Bundle the template from turbo_sync/

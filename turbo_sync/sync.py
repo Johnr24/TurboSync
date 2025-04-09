@@ -39,15 +39,20 @@ def load_config(dotenv_path=None):
         'remote_dir': os.getenv('REMOTE_DIR'),
         'local_dir': os.getenv('LOCAL_DIR'),
         'sync_interval': int(os.getenv('SYNC_INTERVAL', '5')),
-        'rclone_options': os.getenv('RCLONE_OPTIONS', '--progress --transfers=4 --checkers=8'),
+        'rsync_options': os.getenv('RSYNC_OPTIONS', '-avz --delete --progress'), # Changed from rclone_options
         'use_mounted_volume': os.getenv('USE_MOUNTED_VOLUME', '').lower() == 'true',
         'mounted_volume_path': os.getenv('MOUNTED_VOLUME_PATH', ''),
-        'enable_parallel_sync': os.getenv('ENABLE_PARALLEL_SYNC', '').lower() == 'true',
+        # 'enable_parallel_sync' is removed, parallelization handled by ProcessPoolExecutor
         'parallel_processes': int(os.getenv('PARALLEL_PROCESSES', '4'))
     }
-    
-    # Validate required config
-    required_keys = ['remote_user', 'remote_host', 'remote_dir', 'local_dir']
+
+    # Validate required config for SSH mode, less strict for mounted mode
+    required_keys = ['local_dir']
+    if not config['use_mounted_volume']:
+        required_keys.extend(['remote_user', 'remote_host', 'remote_dir'])
+    elif not config['mounted_volume_path']:
+         # If using mounted volume, the path must be set
+         required_keys.append('mounted_volume_path')
     for key in required_keys:
         if not config[key]:
             raise ValueError(f"Missing required configuration: {key}")
@@ -252,187 +257,186 @@ def list_remote_directory(config):
             logger.error(f"Error listing remote directory: {e.stderr}")
             return False
 
-def sync_directory(remote_path, local_base_dir, config):
+def sync_directory(remote_dir_info, local_base_dir, config):
     """
-    Sync a specific remote directory to local using rclone bisync.
+    Sync a specific remote directory to a local directory using rsync.
+
+    Args:
+        remote_dir_info (tuple): A tuple containing (index, remote_path).
+        local_base_dir (str): The base local directory to sync into.
+        config (dict): The loaded configuration dictionary.
 
     Returns:
-        True: If sync (or resync) was successful.
-        dict: {'error': 'lock_file', 'path': lock_file_path} if a lock file error occurred.
-        dict: {'error': 'other'} if any other sync error occurred.
+        tuple: (remote_path, success_flag) where success_flag is True or False.
     """
-    # Calculate the relative path from the remote_dir
-    base_path = config['mounted_path']
+    index, remote_path = remote_dir_info
+    rsync_executable = shutil.which('rsync') or 'rsync' # Find rsync or default
+
+    # Calculate the relative path from the base remote directory or mounted path
+    if config['is_mounted']:
+        base_path = config['mounted_path']
+    else:
+        base_path = config['remote_dir'] # Use the configured remote base for SSH
+
     if remote_path == base_path:
         rel_path = '.'
     else:
         try:
+            # Use relpath carefully, ensuring both paths are absolute or relative consistently
+            # For SSH, remote_path is absolute, base_path might need adjustment if not absolute
+            # For mounted, both should be absolute paths
             rel_path = os.path.relpath(remote_path, base_path)
         except ValueError:
-            # Handle cases where paths might be on different drives (e.g., Windows)
-            # Or if remote_path is not directly under base_path (shouldn't happen with find logic)
-            rel_path = os.path.basename(remote_path) # Fallback to just the directory name
+            rel_path = os.path.basename(remote_path) # Fallback
 
     local_path = os.path.join(local_base_dir, rel_path)
 
-    # Ensure the local directory exists
+    # Ensure the local target directory exists
     os.makedirs(local_path, exist_ok=True)
 
-    # Construct rclone bisync command
-    rclone_opts_str = config['rclone_options']
-    # Split options, remove --bidir if present, then rejoin
-    rclone_opts_list = [opt for opt in rclone_opts_str.split() if opt != '--bidir']
+    # Construct rsync command
+    rsync_opts_str = config['rsync_options']
+    # Use shlex to split options correctly, handling quotes
+    try:
+        import shlex
+        rsync_opts_list = shlex.split(rsync_opts_str)
+    except ImportError:
+        rsync_opts_list = rsync_opts_str.split() # Fallback for environments without shlex
 
-    # Use the full path to rclone if available
-    rclone_executable = os.environ.get('RCLONE_PATH', 'rclone')
-    
-    rclone_cmd = [
-        rclone_executable, 'bisync',
-        f"{remote_path}/",
-        f"{local_path}/"
-    ] + rclone_opts_list # Add options from config, excluding --bidir
+    rsync_cmd = [rsync_executable] + rsync_opts_list
 
-    # Ensure empty source directories are created on the destination
-    rclone_cmd.append('--create-empty-src-dirs')
+    # Define source and destination
+    # Ensure trailing slashes for directory content sync
+    dest = local_path.rstrip('/') + '/'
 
-    # Add common filters (bisync also respects filters)
-    # Using /.** to specifically exclude hidden files/dirs in the *root* of the sync path.
-    # For node_modules, keep the original exclude.
-    rclone_cmd.extend(['--exclude', '/.**', '--exclude', 'node_modules/**'])
+    if config['is_mounted']:
+        source = remote_path.rstrip('/') + '/'
+        logger.info(f"Performing rsync (mounted): {source} -> {dest}")
+    else: # SSH mode
+        # Escape spaces and special characters for SSH path
+        # Using shlex.quote is safer if available
+        try:
+            import shlex
+            escaped_remote_path = shlex.quote(remote_path.rstrip('/'))
+        except ImportError:
+            # Basic escaping for spaces if shlex not available
+            escaped_remote_path = remote_path.replace(' ', '\\ ')
 
-    logger.info(f"Performing bisync between {remote_path} <--> {local_path}")
-    logger.debug(f"Rclone bisync command: {' '.join(rclone_cmd)}")
+        source = f"{config['remote_user']}@{config['remote_host']}:{escaped_remote_path}/"
+        # Add SSH options (port)
+        rsync_cmd.extend(['-e', f"ssh -p {config['remote_port']}"])
+        logger.info(f"Performing rsync (SSH): {source} -> {dest}")
+
+    rsync_cmd.extend([source, dest])
+
+    logger.debug(f"Rsync command for '{remote_path}': {' '.join(rsync_cmd)}")
 
     try:
-        # Initial bisync attempt
-        logger.info(f"Attempting initial bisync for {remote_path} <--> {local_path}")
+        # Run rsync
         result = subprocess.run(
-            rclone_cmd,
+            rsync_cmd,
             capture_output=True,
             text=True,
-            check=True,
-            env=os.environ.copy() # Ensure rclone uses the current environment
+            check=True, # Raise exception on non-zero exit code
+            env=os.environ.copy()
         )
-        logger.info(f"Successfully bisynced {remote_path} <--> {local_path} on first attempt.")
-        # Log bisync output for debugging potential issues
+        logger.info(f"Successfully synced {remote_path} -> {local_path}")
         if result.stdout:
-            logger.debug(f"bisync output:\n{result.stdout}")
+            logger.debug(f"rsync output for {remote_path}:\n{result.stdout}")
         if result.stderr:
-            logger.debug(f"bisync stderr:\n{result.stderr}") # bisync often uses stderr for progress/info
-        return True
+            # rsync often uses stderr for stats/errors, log it
+            logger.debug(f"rsync stderr for {remote_path}:\n{result.stderr}")
+        return (remote_path, True) # Return path and success
     except subprocess.CalledProcessError as e:
-        # bisync has specific exit codes, log them
-        logger.error(f"Initial bisync failed for {remote_path} <--> {local_path}. Exit Code: {e.returncode}")
+        logger.error(f"Rsync failed for {remote_path} -> {local_path}. Exit Code: {e.returncode}")
         logger.error(f"Command: {' '.join(e.cmd)}")
         logger.error(f"Stderr: {e.stderr}")
         logger.error(f"Stdout: {e.stdout}")
-
-        # --- Check for specific lock file error ---
-        lock_file_match = re.search(r'prior lock file found:.*?rclone deletefile "(.*?)"', e.stderr, re.DOTALL)
-        if lock_file_match:
-            lock_file_path = lock_file_match.group(1)
-            logger.warning(f"Detected bisync lock file: {lock_file_path}")
-            # Return specific error info for lock file
-            return {'error': 'lock_file', 'path': lock_file_path}
-        # --- End lock file check ---
-
-
-        # Check if exit code 9 or 7 indicates a resync is needed
-        if e.returncode == 9 or e.returncode == 7:
-            logger.warning(f"Bisync exited with code {e.returncode}. Attempting --resync...")
-            # Construct the resync command
-            resync_cmd = rclone_cmd + ['--resync']
-            logger.debug(f"Rclone bisync --resync command: {' '.join(resync_cmd)}")
-
-            try:
-                # Attempt the resync
-                resync_result = subprocess.run(
-                    resync_cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    env=os.environ.copy()
-                )
-                logger.info(f"Successfully bisynced {remote_path} <--> {local_path} after --resync.")
-                if resync_result.stdout:
-                    logger.debug(f"bisync --resync output:\n{resync_result.stdout}")
-                if resync_result.stderr:
-                    logger.debug(f"bisync --resync stderr:\n{resync_result.stderr}")
-                return True
-            except subprocess.CalledProcessError as resync_e:
-                logger.error(f"Bisync --resync attempt failed for {remote_path} <--> {local_path}. Exit Code: {resync_e.returncode}")
-                logger.error(f"Resync Command: {' '.join(resync_e.cmd)}")
-                logger.error(f"Resync Stderr: {resync_e.stderr}") # Log stderr for resync failure too
-                logger.error(f"Resync Stdout: {resync_e.stdout}")
-                return {'error': 'other'} # Indicate general failure after resync attempt
-            except Exception as resync_ex:
-                 logger.error(f"Unexpected error during bisync --resync attempt for {remote_path} <--> {local_path}: {str(resync_ex)}")
-                 logger.exception("Resync Traceback:")
-                 return {'error': 'other'} # Indicate general failure
-        else:
-            # Error was not exit code 9 or 7, return False without retrying
-            logger.error(f"Bisync failed with unrecoverable exit code {e.returncode}. Not attempting resync.")
-            return {'error': 'other'} # Indicate general failure
+        return (remote_path, False) # Return path and failure
     except Exception as e:
-        logger.error(f"Unexpected error during initial bisync {remote_path} <--> {local_path}: {str(e)}")
-        logger.exception("Traceback:") # Log full traceback for unexpected errors
-        return {'error': 'other'} # Indicate general failure
+        logger.error(f"Unexpected error during rsync {remote_path} -> {local_path}: {str(e)}")
+        logger.exception("Traceback:")
+        return (remote_path, False) # Return path and failure
 
 def perform_sync():
     """
-    Main function to perform the synchronization using rclone bisync sequentially.
+    Main function to perform synchronization using rsync, potentially in parallel.
 
     Returns:
-        dict: A dictionary mapping remote directory paths to their sync status (True for success, False for failure).
-              Returns None if a configuration error or major exception occurs before syncing starts.
+        dict: A dictionary mapping remote directory paths to their sync status (True/False).
+              Returns None if a configuration error or major exception occurs.
     """
+    import shutil # Ensure shutil is imported for which()
     try:
         config = load_config()
 
-        # Ensure we're using mounted volume (bisync requires accessible paths)
-        if not config.get('is_mounted', False):
-            logger.error("Mounted volume not found or not configured. bisync requires direct access.")
-            return None # Indicate general failure
+        # Check if rsync executable exists
+        rsync_path = shutil.which('rsync')
+        if not rsync_path:
+             # Try common paths if not in PATH (especially relevant in bundled app)
+             common_paths = ['/usr/bin/rsync']
+             for p in common_paths:
+                 if os.path.exists(p):
+                     rsync_path = p
+                     break
+        if not rsync_path:
+            logger.error("rsync executable not found in PATH or common locations (/usr/bin/rsync). Please install rsync.")
+            # Consider notifying the user via menubar if possible here
+            return None
 
-        # Ensure mounted path is accessible
-        if not os.path.exists(config['mounted_path']):
-            logger.error(f"Mounted path not accessible: {config['mounted_path']}")
-            return None # Indicate general failure
+        logger.info(f"Using rsync executable at: {rsync_path}")
 
-        # List mounted directory contents (for debugging/confirmation)
-        # list_remote_directory(config) # Optional: uncomment if needed for debugging
+
+        # Validate connection or mounted path based on mode
+        if config['is_mounted']:
+            if not os.path.exists(config['mounted_path']):
+                logger.error(f"Mounted path not accessible: {config['mounted_path']}")
+                return None
+            logger.info(f"Confirmed mounted path exists: {config['mounted_path']}")
+        else: # SSH mode
+            if not test_remote_connection(config): # Keep connection test for SSH
+                 logger.error("Remote SSH connection test failed. Cannot proceed with sync.")
+                 return None
 
         # Ensure local directory exists
         os.makedirs(config['local_dir'], exist_ok=True)
 
         # Find directories with .livework files
-        # bisync typically works on the root sync pair. The current logic finds
-        # directories *containing* .livework and syncs *those* specific directories.
-        # This seems reasonable, as it maintains the previous behavior focus.
         livework_dirs = find_livework_dirs(config)
 
         if not livework_dirs:
             logger.warning("No .livework directories found to sync.")
-            # Return an empty dict as no syncs were attempted/failed.
-            return {}
+            return {} # Return empty dict, no syncs attempted
 
-        # Sync each directory sequentially using bisync
-        logger.info(f"Found {len(livework_dirs)} directories containing .livework to bisync sequentially.")
-        sync_results = {} # Dictionary to store results per directory
-        total_dirs = len(livework_dirs)
+        logger.info(f"Found {len(livework_dirs)} directories containing .livework to sync.")
 
-        for i, remote_dir in enumerate(livework_dirs):
-            logger.info(f"--- Starting bisync for directory {i+1}/{total_dirs}: {remote_dir} ---")
-            result = sync_directory(remote_dir, config['local_dir'], config)
-            sync_results[remote_dir] = result # Store result (True or dict)
-            if result is not True: # Check if it's not success (could be error dict)
-                # Log failure for this specific directory but continue with others
-                logger.warning(f"Bisync failed for directory: {remote_dir}. Continuing with next.")
-            logger.info(f"--- Finished bisync for directory {i+1}/{total_dirs}: {remote_dir} ---")
+        # Use ProcessPoolExecutor for parallel execution
+        max_workers = config.get('parallel_processes', 1) # Default to 1 if not set
+        logger.info(f"Starting parallel sync with up to {max_workers} processes...")
+        sync_results = {}
+        tasks = [(i, dir_path) for i, dir_path in enumerate(livework_dirs)]
+
+        # Use 'spawn' context if available for better compatibility across platforms
+        mp_context = multiprocessing.get_context('spawn')
+        with ProcessPoolExecutor(max_workers=max_workers, mp_context=mp_context) as executor:
+            # Map sync_directory function over the directories
+            # Pass necessary arguments using functools.partial or lambda
+            from functools import partial
+            sync_func = partial(sync_directory, local_base_dir=config['local_dir'], config=config)
+            
+            # Execute tasks and gather results as they complete
+            results_iterator = executor.map(sync_func, tasks)
+
+            for remote_path, success in results_iterator:
+                sync_results[remote_path] = success
+                status = "succeeded" if success else "failed"
+                logger.info(f"Sync task for {remote_path} {status}.")
+
 
         successful_syncs = sum(1 for success in sync_results.values() if success)
-        logger.info(f"Sequential bisync completed. {successful_syncs}/{total_dirs} directories synced successfully.")
-        return sync_results # Return the dictionary of results
+        total_dirs = len(livework_dirs)
+        logger.info(f"Parallel sync completed. {successful_syncs}/{total_dirs} directories synced successfully.")
+        return sync_results
 
     except ValueError as e: # Catch config loading errors
         logger.error(f"Configuration error during sync process: {str(e)}")

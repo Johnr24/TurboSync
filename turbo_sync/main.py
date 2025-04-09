@@ -184,43 +184,54 @@ def setup_icon():
 def check_dependencies():
     """Check if required external dependencies are available"""
     logging.debug("Checking dependencies")
-    # Check if rclone is available
+    rsync_ok = False
+    # Check if rsync is available (usually pre-installed on macOS)
     try:
-        # Try with full path first (for when launched from Applications)
-        rclone_paths = [
-            "/opt/homebrew/bin/rclone",  # Homebrew on Apple Silicon
-            "/usr/local/bin/rclone",     # Homebrew on Intel Mac
-            "rclone"                     # In PATH
+        # Try common paths first, then rely on PATH
+        rsync_paths_to_check = [
+            '/usr/bin/rsync', # Standard macOS location
+            shutil.which('rsync') # Check PATH using shutil.which
         ]
-        
-        for rclone_path in rclone_paths:
-            try:
-                result = subprocess.run([rclone_path, "version"], capture_output=True, check=True)
-                rclone_version = result.stdout.decode('utf-8').split('\n')[0]
-                logging.info(f"rclone found: {rclone_version}")
-                
-                # Set the full path in environment for future use
-                os.environ["RCLONE_PATH"] = rclone_path
-                return True
-            except (subprocess.SubprocessError, FileNotFoundError):
-                continue
-                
-        # If we get here, none of the paths worked
-        raise FileNotFoundError("rclone not found in any of the expected locations")
+        found_path = None
+        for rsync_path in rsync_paths_to_check:
+            if rsync_path and os.path.exists(rsync_path):
+                 try:
+                     # Check if it's executable
+                     if os.access(rsync_path, os.X_OK):
+                         result = subprocess.run([rsync_path, "--version"], capture_output=True, text=True, check=True)
+                         rsync_version = result.stdout.split('\n')[0]
+                         logging.info(f"rsync found: {rsync_version} at {rsync_path}")
+                         found_path = rsync_path
+                         rsync_ok = True
+                         break # Found a working rsync
+                     else:
+                         logging.debug(f"Found rsync at {rsync_path}, but it's not executable.")
+                 except (subprocess.SubprocessError, FileNotFoundError, PermissionError) as check_err:
+                     logging.debug(f"Error checking rsync at {rsync_path}: {check_err}")
+                 except Exception as e:
+                     logging.warning(f"Unexpected error checking rsync at {rsync_path}: {e}")
+
+        if not rsync_ok:
+             raise FileNotFoundError("rsync executable not found or not functional in standard locations or PATH.")
+
     except Exception as e:
-        logging.error(f"rclone not found: {e}")
-        import rumps
-        rumps.notification(
-            "TurboSync Error",
-            "rclone Not Found",
-            "rclone is required for TurboSync to work. Please install it with: brew install rclone",
-            sound=True
-        )
-        logging.error("rclone not found - required for TurboSync to work")
-        return False
-    
+        logging.error(f"rsync check failed: {e}")
+        # rsync is usually built-in, so this error is less common but still possible
+        try:
+            import rumps
+            rumps.notification(
+                "TurboSync Error",
+                "rsync Not Found",
+                "rsync is required for TurboSync. It's usually built-in on macOS. Check your system or PATH.",
+                sound=True
+            )
+        except ImportError:
+             logging.error("Could not import rumps to show notification.")
+        logging.error("rsync not found - required for TurboSync to work")
+        return False # rsync is critical
+
     # Check if fswatch is available if file watching is enabled
-    fswatch_config = get_fswatch_config()
+    fswatch_config = get_fswatch_config() # Assuming get_fswatch_config is defined elsewhere
     if fswatch_config['watch_enabled']:
         if is_fswatch_available():
             try:
