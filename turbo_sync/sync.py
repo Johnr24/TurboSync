@@ -457,13 +457,13 @@ def perform_sync(progress_queue=None):
             # Execute tasks and gather results as they complete
             results_iterator = executor.map(sync_func, tasks)
 
-            for remote_path, success in results_iterator:
-                sync_results[remote_path] = success
-                status = "succeeded" if success else "failed"
+            for remote_path, result_data in results_iterator:
+                sync_results[remote_path] = result_data # Store the whole dict
+                status = "succeeded" if result_data['success'] else "failed"
                 logger.info(f"Sync task for {remote_path} {status}.")
 
 
-        successful_syncs = sum(1 for success in sync_results.values() if success)
+        successful_syncs = sum(1 for res in sync_results.values() if res['success'])
         total_dirs = len(livework_dirs)
         logger.info(f"Parallel sync completed. {successful_syncs}/{total_dirs} directories synced successfully.")
         return sync_results
