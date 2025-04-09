@@ -1,5 +1,6 @@
 import os
 import sys
+import functools # Import functools for partial
 import time
 import threading
 import logging
@@ -15,7 +16,7 @@ from collections import OrderedDict # To maintain setting order
 # from PySide6.QtWidgets import QApplication, QDialog, ...
 # from PySide6.QtCore import Qt, Slot
 
-from turbo_sync.sync import perform_sync, load_config # Absolute import
+from turbo_sync.sync import perform_sync, load_config, find_livework_dirs # Absolute import, added find_livework_dirs
 from turbo_sync.watcher import FileWatcher, is_fswatch_available, get_fswatch_config # Absolute import
 from turbo_sync.utils import get_resource_path # Import from utils
 # --- Import the Settings Dialog logic ---
@@ -65,10 +66,13 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.last_sync_status = "Never synced"
         self.file_watcher = None
         self.watch_enabled = False # Will be updated by setup_file_watcher
+        self.last_sync_results = {} # Store detailed results from last sync
 
         # --- Define Items Needing State Management First ---
         self.status_item = rumps.MenuItem(f"Status: {self.last_sync_status}")
         self.watch_toggle = rumps.MenuItem("Enable File Watching") # Title matches decorator
+        # Create the main menu item that will hold the submenu
+        self.synced_projects_item = rumps.MenuItem("Synced Projects")
 
         # --- Define Complete Menu Structure ---
         # Construct the list with MenuItem objects included directly
@@ -76,6 +80,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             self.status_item,       # Insert the MenuItem object
             "Sync Now",
             "View Logs",
+            self.synced_projects_item, # Add the new item here
             None,                   # Separator
             self.watch_toggle,      # Insert the MenuItem object
             "Settings",
@@ -83,6 +88,9 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             # Quit item added by rumps automatically
         ]
         self.menu = menu_items      # Assign the final list to self.menu
+
+        # Add initial placeholder to the submenu
+        self.synced_projects_item.add(rumps.MenuItem("Loading..."))
 
         # Load configuration
         try:
@@ -92,6 +100,9 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 raise ValueError("load_config failed to return a valid configuration.")
             logging.info(f"Configuration loaded, sync interval: {self.config['sync_interval']} minutes")
             schedule.every(self.config['sync_interval']).minutes.do(self.scheduled_sync)
+
+            # Update the synced projects list now that config is loaded
+            self.update_synced_projects_list()
 
             # Set up file watcher if enabled
             self.setup_file_watcher()
@@ -104,6 +115,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 f"Please check your .env file: {str(e)}",
                 sound=True
             )
+            self.synced_projects_item.clear() # Clear existing items (like "Loading...")
+            self.synced_projects_item.add(rumps.MenuItem("Config Error"))
             self.status_item.title = f"Status: Configuration Error"
 
     def create_fallback_icon(self):
@@ -276,21 +289,45 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.sync_thread.start()
 
     def perform_sync_task(self):
-        """Run the sync in a separate thread"""
+        """Run the sync in a separate thread and schedule UI updates."""
         logging.debug("Starting sync task")
         self.syncing = True
-        self.status_item.title = "Status: Syncing..."
-        success = False # Default to False
-        sync_message = "Sync did not run or failed unexpectedly." # Default message
+        # Initial status update (safe from background thread before long operation)
+        try:
+            self.status_item.title = "Status: Syncing..."
+        except Exception as ui_err:
+            # Log if the initial status update fails, but proceed with sync
+            logging.error(f"Failed to set initial 'Syncing...' status: {ui_err}")
+
+        overall_success = False # Default overall status
+        sync_results = None # Store detailed results here
+        sync_message = "Sync did not run or failed unexpectedly." # Default message for overall status
 
         try:
-            # --- Call perform_sync ---
+            # --- Call the core sync logic ---
             logging.debug("Calling perform_sync()...")
-            success, sync_message = perform_sync() # Get result from perform_sync
-            logging.debug(f"perform_sync() returned: success={success}, message='{sync_message}'")
+            sync_results = perform_sync() # Get detailed results (dict or None)
+            logging.debug(f"perform_sync() returned: {sync_results}")
 
-            # --- Show Notification based on sync result ---
-            if success:
+            # Determine overall success and message based on detailed results
+            if isinstance(sync_results, dict):
+                total_dirs = len(sync_results)
+                successful_syncs = sum(1 for success in sync_results.values() if success)
+                overall_success = total_dirs == 0 or successful_syncs == total_dirs # True if no dirs or all succeeded
+                if total_dirs == 0:
+                    sync_message = "No projects found to sync."
+                elif overall_success:
+                    sync_message = f"Synced {successful_syncs}/{total_dirs} projects successfully."
+                else:
+                    sync_message = f"Sync completed with {total_dirs - successful_syncs} failures out of {total_dirs} projects."
+            else:
+                # perform_sync returned None (config error or major exception)
+                overall_success = False
+                sync_message = "Sync failed due to configuration or system error."
+
+            # --- Show Notification based on sync result (safe from background thread) ---
+            # Notifications are generally thread-safe in rumps/macOS
+            if overall_success:
                 logging.info(f"Sync completed successfully: {sync_message}")
                 try:
                     rumps.notification(
@@ -314,12 +351,14 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                     logging.error(f"Failed to show failure notification: {ne}")
 
         except Exception as e:
-            # --- Handle exceptions during perform_sync() or initial notifications ---
-            logging.exception(f"Exception during sync task (perform_sync call or notification): {e}")
-            success = False # Ensure success is false on exception
+            # --- Handle exceptions during perform_sync() itself ---
+            # This catch block might be less likely to be hit now that perform_sync handles its own exceptions,
+            # but kept for safety.
+            logging.exception(f"Unexpected exception during perform_sync call: {e}")
+            overall_success = False # Ensure success is false on exception
             sync_message = f"An error occurred during sync: {str(e)}" # Use message from exception
             try:
-                # Try to show an error notification for this exception
+                # Try to show an error notification for this specific exception
                 rumps.notification(
                     "TurboSync",
                     "Sync Error",
@@ -329,61 +368,54 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             except Exception as ne:
                  logging.error(f"Failed to show error notification after exception: {ne}")
 
-        # --- Code after perform_sync() call (runs regardless of success/failure/exception) ---
-        try:
-            logging.debug("Updating last sync status string...")
-            self.last_sync_status = f"Last sync: {time.strftime('%H:%M:%S')} - {'Success' if success else 'Failed'}"
-            logging.debug(f"New status string: {self.last_sync_status}")
+        finally:
+            # --- Schedule Final UI Update on Main Thread ---
+            # This block runs regardless of whether an exception occurred in the try block.
+            # It ensures the status is always updated and syncing flag reset correctly.
+            logging.debug(f"Scheduling final status update via timer with overall_success={overall_success}")
+            try:
+                # Use a very short interval (e.g., 0.1s) just to defer execution to the main loop
+                rumps.Timer(self._update_status_after_sync, 0.1).start(timer_info=(overall_success, sync_message, sync_results))
+                logging.debug("Timer scheduled for final status update.")
+            except Exception as timer_e:
+                # If scheduling the timer fails, log the error.
+                # The syncing flag might remain True, which is problematic,
+                # but trying to set it here is still unsafe.
+                logging.error(f"CRITICAL: Failed to schedule status update timer: {timer_e}")
+                # Consider adding more robust error handling here if needed,
+                # e.g., trying to set a flag for the main thread to check later.
 
-            logging.debug("Updating status_item title...")
-            self.status_item.title = f"Status: {self.last_sync_status}" # Rumps call
-            logging.debug("Status_item title updated.")
-
-            logging.debug("Setting self.syncing = False")
-            self.syncing = False
-            logging.debug("Sync task thread finishing cleanly.") # Added final log
-
-        except Exception as e_after:
-             # --- Handle exceptions during the status update phase ---
-             logging.exception(f"Exception *after* sync completed/failed, during status update: {e_after}")
-             # Try to show a notification about this specific error
-             try:
-                 rumps.notification(
-                     "TurboSync",
-                     "Internal Error",
-                     f"Error updating status after sync: {str(e_after)}",
-                     sound=True
-                 )
-             except Exception as ne2:
-                 logging.error(f"Failed to show post-sync error notification: {ne2}")
-             # Ensure syncing flag is reset even if status update fails
-             # --- Schedule UI Update on Main Thread ---
-             # Instead of updating UI directly, schedule it via a timer
-             # Pass the results (success, sync_message) to the timer callback
-             logging.debug(f"Scheduling status update via timer with success={success}")
-             # Use a very short interval (e.g., 0.1s) just to defer execution to the main loop
-             rumps.Timer(self._update_status_after_sync, 0.1).start(timer_info=(success, sync_message))
-             logging.debug("Timer started for status update. Sync task thread finishing.")
-             # Note: self.syncing will now be set to False within _update_status_after_sync
+        logging.debug("Sync task thread finishing.")
+        # DO NOT update self.status_item.title or self.syncing here.
+        # It will be handled by _update_status_after_sync on the main thread.
  
     def _update_status_after_sync(self, timer_info):
-        """Update status item and syncing flag on the main thread after sync."""
-        # timer_info is expected to be a tuple: (success_status, sync_message_string)
-        if not isinstance(timer_info, tuple) or len(timer_info) != 2:
+        """Update status item, syncing flag, and project list on the main thread after sync."""
+        # timer_info is expected to be a tuple: (overall_success_status, sync_message_string, sync_results_dict_or_none)
+        if not isinstance(timer_info, tuple) or len(timer_info) != 3:
              logging.error(f"Invalid timer_info received in _update_status_after_sync: {timer_info}")
              # Attempt to reset syncing flag anyway
              self.syncing = False
+             self.last_sync_results = None # Indicate error state
+             self.update_synced_projects_list() # Update list to show error
              return
 
-        success, sync_message = timer_info # Unpack the data passed via the timer
+        overall_success, sync_message, sync_results = timer_info # Unpack the data
+        self.last_sync_results = sync_results # Store the detailed results
+
         try:
-            logging.debug(f"Timer callback: Updating status after sync (success={success})")
-            self.last_sync_status = f"Last sync: {time.strftime('%H:%M:%S')} - {'Success' if success else 'Failed'}"
+            logging.debug(f"Timer callback: Updating status after sync (overall_success={overall_success})")
+            self.last_sync_status = f"Last sync: {time.strftime('%H:%M:%S')} - {'Success' if overall_success else 'Failed'}"
             logging.debug(f"Timer callback: New status string: {self.last_sync_status}")
 
             logging.debug("Timer callback: Updating status_item title...")
             self.status_item.title = f"Status: {self.last_sync_status}"
             logging.debug("Timer callback: Status_item title updated.")
+
+            # Update the project list submenu with the new status details
+            logging.debug("Timer callback: Updating synced projects list...")
+            self.update_synced_projects_list()
+            logging.debug("Timer callback: Synced projects list updated.")
 
             logging.debug("Timer callback: Setting self.syncing = False")
             self.syncing = False
@@ -393,6 +425,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             logging.exception(f"Exception during timer-based status update: {e}")
             # Attempt to set syncing to False even if status update fails
             self.syncing = False
+            self.last_sync_results = None # Indicate error state
+            self.update_synced_projects_list() # Update list to show error
 
     def scheduled_sync(self):
         """Run the scheduled sync if not already syncing"""
@@ -420,7 +454,97 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 sound=False
             )
 
+    def update_synced_projects_list(self):
+        """
+        Updates the submenu showing the list of synced projects.
+        Uses self.last_sync_results to add status indicators (e.g., for errors).
+        Assumes self.last_sync_results is populated before this is called after a sync.
+        """
+        logging.debug("Updating synced projects list menu item")
+
+        # Clear existing items in the submenu first
+        self.synced_projects_item.clear()
+
+        if not hasattr(self, 'config') or not self.config:
+            logging.warning("Cannot update synced projects list: config not loaded.")
+            self.synced_projects_item.title = "Synced Projects" # Keep title simple
+            self.synced_projects_item.add(rumps.MenuItem("Config Error"))
+            return
+
+        try:
+            livework_dirs = sorted(find_livework_dirs(self.config)) # Sort for consistent order
+            count = len(livework_dirs)
+            logging.info(f"Found {count} synced projects.")
+            self.synced_projects_item.title = f"Synced Projects ({count})" # Update title with count
+            if count > 0:
+                for dir_path in livework_dirs:
+                    item_title = os.path.basename(dir_path)
+                    # Check status from the last sync results
+                    sync_status = None
+                    if isinstance(self.last_sync_results, dict):
+                        sync_status = self.last_sync_results.get(dir_path) # Get status for this dir
+
+                    project_item = rumps.MenuItem(item_title) # Default item
+
+                    if isinstance(sync_status, dict): # Check if it's an error dictionary
+                        if sync_status.get('error') == 'lock_file':
+                            item_title = f"⚠️ {item_title}" # Prepend error indicator
+                            project_item.title = item_title
+                            lock_file_path = sync_status.get('path')
+                            if lock_file_path:
+                                # Create submenu item with callback using partial
+                                action_item = rumps.MenuItem("Remove Lock File & Retry Sync")
+                                action_item.set_callback(functools.partial(self._remove_lock_file_and_retry, lock_file_path=lock_file_path))
+                                project_item.add(action_item) # Add action as submenu
+                        elif sync_status.get('error') == 'other':
+                             item_title = f"❓ {item_title}" # Prepend unknown/error indicator
+                             project_item.title = item_title
+                    elif self.last_sync_results is None and count > 0: # General sync error (e.g., config)
+                        # Indicate general sync error if results are None but dirs were found
+                        item_title = f"❓ {item_title}" # Prepend unknown/error indicator
+                        project_item.title = item_title
+
+                    self.synced_projects_item.add(project_item) # Add the potentially modified item
+            else:
+                self.synced_projects_item.add(rumps.MenuItem("No projects found"))
+        except Exception as e:
+            logging.error(f"Error finding livework directories: {e}")
+            self.synced_projects_item.title = "Synced Projects" # Keep title simple
+            self.synced_projects_item.add(rumps.MenuItem("Error loading projects"))
+
     # --- Helper Functions for Login Item ---
+
+    def _remove_lock_file_and_retry(self, lock_file_path, sender=None):
+        """Callback to remove a specific rclone lock file and trigger sync."""
+        if not lock_file_path:
+            logging.error("Remove lock file called without a path.")
+            rumps.notification("TurboSync Error", "Cannot remove lock file", "No path provided.")
+            return
+
+        logging.info(f"Attempting to remove lock file: {lock_file_path}")
+
+        # Find rclone executable
+        rclone_executable = os.environ.get('RCLONE_PATH', shutil.which('rclone'))
+        if not rclone_executable:
+             logging.error("rclone executable not found for lock file removal.")
+             rumps.notification("TurboSync Error", "rclone Not Found", "Cannot find rclone to remove lock file.")
+             return
+
+        try:
+            cmd = [rclone_executable, "deletefile", lock_file_path]
+            logging.debug(f"Executing command: {' '.join(cmd)}")
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            logging.info(f"Successfully removed lock file: {lock_file_path}")
+            logging.debug(f"rclone deletefile output: {result.stdout} {result.stderr}")
+            rumps.notification("TurboSync", "Lock File Removed", "Attempting sync again...")
+            # Trigger a new sync
+            self.sync_now(None)
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Failed to remove lock file '{lock_file_path}': {e.stderr}")
+            rumps.notification("TurboSync Error", "Failed to Remove Lock File", f"Error: {e.stderr[:100]}")
+        except Exception as e:
+            logging.exception(f"Unexpected error removing lock file '{lock_file_path}': {e}")
+            rumps.notification("TurboSync Error", "Failed to Remove Lock File", f"Unexpected error: {e}")
 
     def _get_app_path(self):
         """Determines the path to the running application bundle (.app)."""
