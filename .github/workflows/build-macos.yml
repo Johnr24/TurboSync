@@ -52,6 +52,9 @@ jobs:
           xattr -cr "${APP_PATH}"
           echo "Setting standard permissions (755) on ${APP_PATH}..."
           chmod -R 755 "${APP_PATH}"
+          echo "Ensuring bundled binaries are executable..."
+          chmod +x "${APP_PATH}/Contents/MacOS/fswatch" || echo "Warning: Failed to chmod fswatch"
+          chmod +x "${APP_PATH}/Contents/MacOS/rclone" || echo "Warning: Failed to chmod rclone"
           echo "Permissions fixed."
 
       # --- Release Steps (only run on tag push) ---
