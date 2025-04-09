@@ -301,6 +301,7 @@ if __name__ == "__main__":
     )
     parser.add_argument('--sudo-install', action='store_true', help='Install app to /Applications using sudo (avoids permission issues)')
     parser.add_argument('--launch', action='store_true', help='Launch the app from the dist directory after building.')
+    parser.add_argument('--non-interactive', action='store_true', help='Run in non-interactive mode (for CI/automation, currently a no-op).')
     # Add flags for install/launch if needed for non-interactive local use,
     # but typically not desired for CI.
     # parser.add_argument('--install-app', action='store_true', help='Install app to /Applications (non-interactive).')
