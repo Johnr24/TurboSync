@@ -163,9 +163,7 @@ a = Analysis(
     datas=[
         ('{os.path.join(script_dir, "turbo_sync", ".env.template")}', '.'), # Bundle the template from turbo_sync/
         ('{icon_path}', '.'),                                               # Include icon.png in the root
-        # --- Add binaries to datas section ---
-        ('{fswatch_path}', 'Contents/MacOS'), # Copy fswatch to Contents/MacOS
-        ('{rsync_path}', 'Contents/MacOS'),   # Copy rsync to Contents/MacOS
+        # Binaries will be copied manually after build
     ],
     hiddenimports=['plistlib', 'AppKit', 'Foundation', 'Cocoa', 'rumps', 'objc'],
     hookspath=[],
@@ -246,10 +244,29 @@ app = BUNDLE(
     pyinstaller_command = ["pyinstaller", spec_file, "--noconfirm"] # --noconfirm prevents prompts
     subprocess.run(pyinstaller_command, check=True)
 
-    # Removed redundant copy of .env to dist folder
-    
-    print("Build complete!")
+    # --- Manually copy binaries after PyInstaller build ---
     app_path = os.path.join(script_dir, "dist", "TurboSync.app")
+    macos_dir = os.path.join(app_path, "Contents", "MacOS")
+    print(f"Manually copying binaries to {macos_dir}...")
+    try:
+        # Ensure MacOS directory exists (it should, but check just in case)
+        os.makedirs(macos_dir, exist_ok=True)
+
+        dest_fswatch = os.path.join(macos_dir, os.path.basename(fswatch_path))
+        shutil.copy2(fswatch_path, dest_fswatch) # copy2 preserves metadata like permissions
+        print(f"  - Copied {os.path.basename(fswatch_path)} to {macos_dir}")
+
+        dest_rsync = os.path.join(macos_dir, os.path.basename(rsync_path))
+        shutil.copy2(rsync_path, dest_rsync)
+        print(f"  - Copied {os.path.basename(rsync_path)} to {macos_dir}")
+    except Exception as e:
+        print(f"Error manually copying binaries: {e}")
+        # Decide if build should fail here? For now, just warn and continue.
+    # --- End manual copy ---
+
+    # Removed redundant copy of .env to dist folder
+
+    print("Build complete!")
     print(f"App is located at: {app_path}")
 
     # Explicitly set execute permissions for bundled binaries after build
