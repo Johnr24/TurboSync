@@ -11,14 +11,37 @@ import argparse
 import sys # Added sys import
 
 def find_required_binary(name):
-    """Find a required binary on the system PATH and return its path."""
+    """
+    Find a required binary, prioritizing common user installation paths (like Homebrew)
+    before falling back to the system PATH.
+    """
+    # Common Homebrew paths (Apple Silicon, Intel)
+    preferred_paths = [
+        f"/opt/homebrew/bin/{name}",
+        f"/usr/local/bin/{name}",
+    ]
+
+    # Check preferred paths first
+    for preferred_path in preferred_paths:
+        if os.path.exists(preferred_path) and os.access(preferred_path, os.X_OK):
+            print(f"Found '{name}' at preferred location: {preferred_path}")
+            return preferred_path
+
+    # If not found in preferred paths, use shutil.which to search the system PATH
     path = shutil.which(name)
-    if not path:
-        print(f"Error: Required binary '{name}' not found in system PATH.")
-        print(f"Please install '{name}' and ensure it's accessible in your PATH.")
+    if path:
+        print(f"Found '{name}' using system PATH: {path}")
+        # Check if the found path is SIP protected (like /usr/bin/rsync)
+        if path.startswith("/usr/bin/") or path.startswith("/bin/") or path.startswith("/sbin/") or path.startswith("/usr/sbin/"):
+             print(f"Warning: Found '{name}' at system path '{path}'. This might be SIP protected.")
+             print(f"Consider installing '{name}' via Homebrew ('brew install {name}') for better bundling compatibility.")
+             # We will still try to use it, but copying might fail later.
+        return path
+    else:
+        # If still not found, exit with an error
+        print(f"Error: Required binary '{name}' not found in preferred locations or system PATH.")
+        print(f"Please install '{name}' (e.g., 'brew install {name}') and ensure it's accessible.")
         sys.exit(1) # Exit if binary not found
-    print(f"Found '{name}' at: {path}")
-    return path
 
 def ensure_icon_exists():
     """Ensure the icon exists for the app"""
