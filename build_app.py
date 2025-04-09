@@ -252,9 +252,27 @@ app = BUNDLE(
     app_path = os.path.join(script_dir, "dist", "TurboSync.app")
     print(f"App is located at: {app_path}")
 
-    # Removed call to internal fix_app_permissions.
-    # Permissions are now handled comprehensively in the GitHub Actions workflow
-    # fix_app_permissions(app_path)
+    # Explicitly set execute permissions for bundled binaries after build
+    macos_dir = os.path.join(app_path, "Contents", "MacOS")
+    fswatch_bundled_path = os.path.join(macos_dir, os.path.basename(fswatch_path))
+    rsync_bundled_path = os.path.join(macos_dir, os.path.basename(rsync_path))
+
+    print(f"Setting execute permissions for bundled binaries in {macos_dir}...")
+    try:
+        if os.path.exists(fswatch_bundled_path):
+            subprocess.run(["chmod", "+x", fswatch_bundled_path], check=True)
+            print(f"  - Set +x for {os.path.basename(fswatch_path)}")
+        else:
+             print(f"  - Warning: Bundled fswatch not found at {fswatch_bundled_path}")
+
+        if os.path.exists(rsync_bundled_path):
+             subprocess.run(["chmod", "+x", rsync_bundled_path], check=True)
+             print(f"  - Set +x for {os.path.basename(rsync_path)}")
+        else:
+             print(f"  - Warning: Bundled rsync not found at {rsync_bundled_path}")
+    except Exception as e:
+        print(f"Warning: Failed to set execute permissions for bundled binaries: {e}")
+
 
     # Interactive install/launch prompts removed. Use --sudo-install for installation.
     print("Build finished. Use --sudo-install flag to install to /Applications.")
