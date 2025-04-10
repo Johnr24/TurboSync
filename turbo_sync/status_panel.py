@@ -226,6 +226,13 @@ class StatusPanel(QDialog):
             # Set alignment for progress
             item_progress.setTextAlignment(Qt.AlignCenter)
 
+            # Set status color based on value
+            if status in ["Idle", "Success"]:
+                item_status.setForeground(Qt.gray)
+            elif status == "Failed":
+                item_status.setForeground(Qt.red)
+            # Add more conditions here if needed (e.g., Syncing = blue?)
+
             # Add items to table
             self.table_widget.setItem(row, 0, item_project)
             self.table_widget.setItem(row, 1, item_status)
