@@ -936,11 +936,12 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
         for path in livework_dirs: # Iterate through all known projects
             name = os.path.basename(path)
-            status = "Idle" # Default status
+            # Default to 'Up to date' for initial state before first sync
+            status = "Up to date ✅"
             progress = None
-            details = ""
+            details = "Awaiting first sync" # Initial detail message
 
-            # Check active progress first
+            # Check active progress first (will override default)
             if path in self.active_sync_progress:
                 status = "Syncing"
                 progress = self.active_sync_progress[path]
