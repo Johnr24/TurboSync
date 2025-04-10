@@ -31,8 +31,8 @@ def load_config(dotenv_path=None):
         load_dotenv(override=True) # Original call
 
     logger.debug(f"Attempting to load configuration values after load_dotenv(override=True, path='{dotenv_path}')")
-    logger.debug(f"RCLONE_OPTIONS from env: {os.getenv('RCLONE_OPTIONS')}")
-    
+    logger.debug(f"RSYNC_OPTIONS from env: {os.getenv('RSYNC_OPTIONS')}") # Changed from RCLONE_OPTIONS
+
     config = {
         'remote_user': os.getenv('REMOTE_USER'),
         'remote_host': os.getenv('REMOTE_HOST'),
