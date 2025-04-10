@@ -909,6 +909,94 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
     # Removed custom quit_app method and decorator. Relying entirely on default rumps Quit button.
     # The default Quit button should call rumps.quit_application()
 
+    # --- Status Panel Methods ---
+
+    def _get_combined_status(self):
+        """Merges active progress and last results into a format for the status panel."""
+        combined = {}
+        # Ensure last_sync_results is treated as a dict even if None
+        last_results_dict = self.last_sync_results if isinstance(self.last_sync_results, dict) else {}
+        all_paths = set(self.active_sync_progress.keys()) | set(last_results_dict.keys())
+
+        for path in all_paths:
+            name = os.path.basename(path)
+            status = "Idle"
+            progress = None
+            details = ""
+
+            # Check active progress first
+            if path in self.active_sync_progress:
+                status = "Syncing"
+                progress = self.active_sync_progress[path]
+            # Check last results if not actively syncing
+            elif path in last_results_dict:
+                result_data = last_results_dict[path]
+                if isinstance(result_data, dict):
+                    if result_data.get('success') is True:
+                        status = "Success"
+                        synced_files = result_data.get('synced_files', [])
+                        details = f"{len(synced_files)} files transferred" if synced_files else "No changes"
+                    elif result_data.get('success') is False:
+                        status = "Failed"
+                        details = result_data.get('error', 'Unknown error')
+                        # Truncate long error messages for the panel
+                        if len(details) > 100:
+                            details = details[:97] + "..."
+                else: # Should not happen
+                    status = "Unknown"
+            # If path is not in active progress or last results (e.g., just discovered), show as Idle
+            else:
+                 status = "Idle"
+
+
+            combined[path] = {
+                "name": name,
+                "status": status,
+                "progress": progress,
+                "details": details
+            }
+        return combined
+
+    # @rumps.clicked("Show Sync Status") # Decorator removed, callback set in __init__
+    def show_status_panel(self, sender):
+        """Creates or shows the Sync Status panel."""
+        logging.info("Show Sync Status clicked.")
+        try:
+            # Ensure QApplication instance exists (needed for PySide)
+            app = QApplication.instance()
+            if not app:
+                logging.debug("Creating QApplication instance for Status Panel.")
+                # Pass sys.argv or an empty list if running bundled/without args
+                app = QApplication(sys.argv if hasattr(sys, 'argv') else [])
+
+            if self.status_panel_window is None:
+                logging.debug("Creating new StatusPanel window.")
+                self.status_panel_window = StatusPanel()
+                # Connect the closed signal to our handler
+                self.status_panel_window.closed.connect(self._status_panel_closed)
+                # Update with current status immediately
+                combined_status = self._get_combined_status()
+                self.status_panel_window.update_status(combined_status)
+                self.status_panel_window.show()
+            else:
+                logging.debug("Showing existing StatusPanel window.")
+                # Update with current status before showing
+                combined_status = self._get_combined_status()
+                self.status_panel_window.update_status(combined_status)
+                self.status_panel_window.show()
+                self.status_panel_window.raise_() # Bring to front
+                self.status_panel_window.activateWindow() # Ensure focus
+
+        except Exception as e:
+            logging.exception("Failed to create or show Status Panel")
+            rumps.notification("TurboSync Error", "Status Panel Error", f"Could not open status panel: {e}")
+
+    def _status_panel_closed(self):
+        """Slot called when the status panel emits the 'closed' signal (is hidden)."""
+        logging.debug("Status panel reported closed (hidden).")
+        # We keep the reference self.status_panel_window, as the window is hidden, not deleted.
+
+    # --- End Status Panel Methods ---
 
 def run_app():
     logging.info("Starting TurboSync app")
