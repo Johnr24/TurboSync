@@ -948,12 +948,16 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             elif path in last_results_dict:
                 result_data = last_results_dict[path]
                 if isinstance(result_data, dict):
+                    synced_files = result_data.get('synced_files', []) # Get files list first
                     if result_data.get('success') is True:
-                        status = "Success"
-                        synced_files = result_data.get('synced_files', [])
-                        details = f"{len(synced_files)} files transferred" if synced_files else "No changes"
+                        if not synced_files: # No files transferred
+                            status = "Up to date ✅"
+                            details = "Already up to date"
+                        else: # Files were transferred
+                            status = "Success ✅"
+                            details = f"{len(synced_files)} files transferred"
                     elif result_data.get('success') is False:
-                        status = "Failed"
+                        status = "Failed ❌" # Add emoji for failure too
                         details = result_data.get('error', 'Unknown error')
                         # Truncate long error messages for the panel
                         if len(details) > 100:
