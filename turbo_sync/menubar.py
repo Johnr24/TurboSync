@@ -24,6 +24,9 @@ import textwrap # For formatting long messages
 from turbo_sync.utils import get_resource_path # Import from utils
 # --- Import the Settings Dialog logic ---
 from turbo_sync.settings_dialog import launch_pyside_settings_dialog # Import the launcher function
+# --- Imports needed for Status Panel ---
+from PySide6.QtWidgets import QApplication
+from turbo_sync.status_panel import StatusPanel
 
 # Define user-specific config path (consistent with main.py)
 APP_NAME = "TurboSync"
