@@ -110,10 +110,10 @@ SYNC_INTERVAL=5
 # Watch local files for changes
 WATCH_LOCAL_FILES=true
 WATCH_DELAY_SECONDS=2
-
-# Rclone options - optimized for performance
-RCLONE_OPTIONS=--progress --transfers=4 --checkers=8 --buffer-size=32M --fast-list --delete-excluded --exclude=".*" --exclude="node_modules"
-
+ 
+# Rsync options - standard flags
+RSYNC_OPTIONS="-avz --delete --progress --exclude='.*' --exclude='node_modules/'"
+ 
 # Parallel sync (multiple connections)
 PARALLEL_PROCESSES=4
 """
