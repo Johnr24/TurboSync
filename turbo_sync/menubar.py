@@ -915,15 +915,28 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
     # --- Status Panel Methods ---
 
     def _get_combined_status(self):
-        """Merges active progress and last results into a format for the status panel."""
+        """Gets the status of all known projects for the status panel."""
         combined = {}
+        # Ensure config is loaded before trying to find directories
+        if not hasattr(self, 'config') or not self.config:
+            logging.warning("Cannot get combined status: config not loaded.")
+            # Return a special entry indicating the config issue
+            return {"config_error": {"name": "Error", "status": "Config Error", "progress": None, "details": "Load configuration first."}}
+
+        try:
+            # Get the definitive list of project directories
+            livework_dirs = sorted(find_livework_dirs(self.config))
+            logging.debug(f"Found {len(livework_dirs)} projects for status panel.")
+        except Exception as e:
+            logging.error(f"Error finding livework directories for status panel: {e}")
+            return {"find_error": {"name": "Error", "status": "Project Scan Error", "progress": None, "details": str(e)}}
+
         # Ensure last_sync_results is treated as a dict even if None
         last_results_dict = self.last_sync_results if isinstance(self.last_sync_results, dict) else {}
-        all_paths = set(self.active_sync_progress.keys()) | set(last_results_dict.keys())
 
-        for path in all_paths:
+        for path in livework_dirs: # Iterate through all known projects
             name = os.path.basename(path)
-            status = "Idle"
+            status = "Idle" # Default status
             progress = None
             details = ""
 
