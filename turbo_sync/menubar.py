@@ -72,12 +72,13 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.last_sync_results = {} # Store detailed results {path: {'success': bool, 'synced_files': [], 'error': 'msg', 'error_type': 'optional_str'}}
         self.active_sync_progress = {} # Store current progress {path: percentage}
         # Use Manager().Queue() for inter-process communication with ProcessPoolExecutor
-        self.manager = multiprocessing.Manager()
-        self.progress_queue = self.manager.Queue() # Queue for sync progress
-        self.progress_timer = None # Timer to check the queue
+       self.manager = multiprocessing.Manager()
+       self.progress_queue = self.manager.Queue() # Queue for sync progress
+       self.progress_timer = None # Timer to check the queue
+       self.status_panel_window = None # Reference to the status panel window
 
-        # --- Define Items Needing State Management First ---
-        self.status_item = rumps.MenuItem(f"Status: {self.last_sync_status}")
+       # --- Define Items Needing State Management First ---
+       self.status_item = rumps.MenuItem(f"Status: {self.last_sync_status}")
         self.watch_toggle = rumps.MenuItem("Enable File Watching") # Title matches decorator
         # Create the main menu item that will hold the submenu
         self.synced_projects_item = rumps.MenuItem("Synced Projects")
@@ -503,11 +504,20 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             # Stop the progress timer now that sync is finished
             if self.progress_timer:
                 logging.debug("Stopping progress timer.")
-                self.progress_timer.stop()
-                self.progress_timer = None
+               logging.debug("Stopping progress timer.")
+               self.progress_timer.stop()
+               self.progress_timer = None
 
-        except Exception as e:
-            logging.exception(f"Exception during timer-based status update: {e}")
+           # Update status panel if visible
+           if self.status_panel_window and self.status_panel_window.isVisible():
+               try:
+                   combined_status = self._get_combined_status()
+                   self.status_panel_window.update_status(combined_status)
+               except Exception as panel_update_err:
+                   logging.error(f"Error updating status panel after sync: {panel_update_err}")
+
+       except Exception as e:
+           logging.exception(f"Exception during timer-based status update: {e}")
             # Attempt to set syncing to False and stop timer even if status update fails
             self.syncing = False
             if self.progress_timer:
