@@ -80,18 +80,20 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
        # --- Define Items Needing State Management First ---
        self.status_item = rumps.MenuItem(f"Status: {self.last_sync_status}")
         self.watch_toggle = rumps.MenuItem("Enable File Watching") # Title matches decorator
-        # Create the main menu item that will hold the submenu
-        self.synced_projects_item = rumps.MenuItem("Synced Projects")
+       # Create the main menu item that will hold the submenu
+       self.synced_projects_item = rumps.MenuItem("Synced Projects")
 
-        # --- Define Complete Menu Structure ---
-        # Construct the list with MenuItem objects included directly
-        menu_items = [
-            self.status_item,       # Insert the MenuItem object
-            "Sync Now",
-            "View Logs",
-            self.synced_projects_item, # Add the new item here
-            None,                   # Separator
-            self.watch_toggle,      # Insert the MenuItem object
+       # --- Define Complete Menu Structure ---
+       self.status_panel_item = rumps.MenuItem("Show Sync Status") # New item
+       # Construct the list with MenuItem objects included directly
+       menu_items = [
+           self.status_item,       # Insert the MenuItem object
+           "Sync Now",
+           self.status_panel_item, # Add the new item here
+           "View Logs",
+           self.synced_projects_item, # Add the new item here
+           None,                   # Separator
+           self.watch_toggle,      # Insert the MenuItem object
             "Settings",
             None,                   # Separator
             # Quit item added by rumps automatically
