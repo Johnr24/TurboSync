@@ -59,19 +59,32 @@ class FileWatcher:
         self.event_count += 1
         
         with self._lock:
-            # Log detailed event information
+            # Log detailed event information, handling potential FileNotFoundError
             try:
-                event_type = "Directory" if os.path.isdir(path) else "File"
-                event_size = os.path.getsize(path) if os.path.isfile(path) else "N/A"
-                event_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(path)))
-                logging.info(f"File System Event #{self.event_count}:")
-                logging.info(f"  Path: {path}")
-                logging.info(f"  Type: {event_type}")
-                logging.info(f"  Size: {event_size}")
-                logging.info(f"  Modified: {event_time}")
+                # Check existence first before trying to get details
+                if os.path.exists(path):
+                    event_type = "Directory" if os.path.isdir(path) else "File"
+                    event_size = os.path.getsize(path) if os.path.isfile(path) else "N/A"
+                    event_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(path)))
+                    logging.info(f"File System Event #{self.event_count}:")
+                    logging.info(f"  Path: {path}")
+                    logging.info(f"  Type: {event_type}")
+                    logging.info(f"  Size: {event_size}")
+                    logging.info(f"  Modified: {event_time}")
+                else:
+                    # File doesn't exist when we checked, likely temporary
+                    logging.info(f"File System Event #{self.event_count}:")
+                    logging.info(f"  Path: {path} (File disappeared before details could be read - likely temporary)")
+
+            except FileNotFoundError:
+                 # Catch specific error if file disappears between os.path.exists and other calls
+                 logging.warning(f"File disappeared during detail retrieval: {path}")
+                 logging.info(f"File System Event #{self.event_count}:")
+                 logging.info(f"  Path: {path} (File disappeared before details could be read - likely temporary)")
             except Exception as e:
-                logging.error(f"Error getting event details: {e}")
-            
+                 # Catch other potential errors during detail retrieval
+                 logging.error(f"Error getting event details for {path}: {e}")
+
             # Debounce - only trigger if it's been longer than delay_seconds since the last event
             if current_time - self.last_event_time > self.delay_seconds:
                 logging.info(f"Change detected in {path}")
