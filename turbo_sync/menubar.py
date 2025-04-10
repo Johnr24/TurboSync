@@ -642,9 +642,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                         item_title = f"❓ {base_name}" # Prepend general error indicator
                         project_item = rumps.MenuItem(item_title)
 
-                    # 4. Default: Just show the name (e.g., first run, or sync hasn't touched this dir)
+                    # 4. Default: Show as "Up to date" initially (e.g., first run, or sync hasn't touched this dir)
                     else:
-                        project_item = rumps.MenuItem(item_title) # Item with just the base name
+                        item_title = f"✅ {base_name}" # Prepend tick for initial state
+                        project_item = rumps.MenuItem(item_title) # Item with tick and base name
 
                     self.synced_projects_item.add(project_item) # Add the constructed item
             else:
