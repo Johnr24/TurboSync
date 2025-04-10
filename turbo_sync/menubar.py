@@ -85,6 +85,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
         # --- Define Complete Menu Structure ---
         self.status_panel_item = rumps.MenuItem("Show Sync Status") # New item
+        self.status_panel_item.set_callback(self.show_status_panel) # Explicitly set callback
         # Construct the list with MenuItem objects included directly
         menu_items = [
             self.status_item,       # Insert the MenuItem object
