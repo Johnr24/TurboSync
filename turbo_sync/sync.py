@@ -375,20 +375,16 @@ def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None)
         logger.debug(f"Reading stdout for {project_name}...")
         if process.stdout:
             while True:
-                # Check if process has terminated before reading line
-                if process.poll() is not None and process.stdout.peek(1) == b'':
-                     logger.debug(f"Process terminated and stdout empty for {project_name}, breaking read loop.")
-                     break
-
                 line = process.stdout.readline()
                 if not line:
-                    # If readline returns empty but process is still running, wait briefly
-                    if process.poll() is None:
-                        time.sleep(0.05) # Small sleep to avoid busy-waiting
-                        continue
-                    else:
-                        logger.debug(f"End of stdout stream for {project_name}.")
+                    # If readline returns empty, check if the process has finished.
+                    if process.poll() is not None:
+                        logger.debug(f"End of stdout stream and process terminated for {project_name}.")
                         break # End of stream and process finished
+                    else:
+                        # Process still running, but no output right now, wait briefly
+                        time.sleep(0.05)
+                        continue
 
                 line_strip = line.strip()
                 if not line_strip: # Skip empty lines
