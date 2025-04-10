@@ -510,15 +510,15 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 self.progress_timer = None
 
             # Update status panel if visible
-           if self.status_panel_window and self.status_panel_window.isVisible():
-               try:
-                   combined_status = self._get_combined_status()
-                   self.status_panel_window.update_status(combined_status)
-               except Exception as panel_update_err:
-                   logging.error(f"Error updating status panel after sync: {panel_update_err}")
+            if self.status_panel_window and self.status_panel_window.isVisible():
+                try:
+                    combined_status = self._get_combined_status()
+                    self.status_panel_window.update_status(combined_status)
+                except Exception as panel_update_err:
+                    logging.error(f"Error updating status panel after sync: {panel_update_err}")
 
-       except Exception as e:
-           logging.exception(f"Exception during timer-based status update: {e}")
+        except Exception as e:
+            logging.exception(f"Exception during timer-based status update: {e}")
             # Attempt to set syncing to False and stop timer even if status update fails
             self.syncing = False
             if self.progress_timer:
