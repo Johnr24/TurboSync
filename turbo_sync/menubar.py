@@ -506,11 +506,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             # Stop the progress timer now that sync is finished
             if self.progress_timer:
                 logging.debug("Stopping progress timer.")
-               logging.debug("Stopping progress timer.")
-               self.progress_timer.stop()
-               self.progress_timer = None
+                self.progress_timer.stop()
+                self.progress_timer = None
 
-           # Update status panel if visible
+            # Update status panel if visible
            if self.status_panel_window and self.status_panel_window.isVisible():
                try:
                    combined_status = self._get_combined_status()
