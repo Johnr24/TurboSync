@@ -343,10 +343,18 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         except multiprocessing.queues.Empty:
             pass # Queue is empty, nothing to do
         except Exception as e:
-            logging.error(f"Error checking progress queue: {e}")
+           logging.error(f"Error checking progress queue: {e}")
 
-    def perform_sync_task(self):
-        """Run the sync in a separate thread and schedule UI updates."""
+       # Update status panel if visible
+       if self.status_panel_window and self.status_panel_window.isVisible():
+            try:
+                combined_status = self._get_combined_status()
+                self.status_panel_window.update_status(combined_status)
+            except Exception as panel_update_err:
+                logging.error(f"Error updating status panel during progress check: {panel_update_err}")
+
+   def perform_sync_task(self):
+       """Run the sync in a separate thread and schedule UI updates."""
         logging.debug("Starting sync task")
         self.syncing = True
 
