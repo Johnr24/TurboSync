@@ -85,11 +85,11 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
         # --- Define Complete Menu Structure ---
         self.status_panel_item = rumps.MenuItem("Show Sync Status") # New item
-       # Construct the list with MenuItem objects included directly
-       menu_items = [
-           self.status_item,       # Insert the MenuItem object
-           "Sync Now",
-           self.status_panel_item, # Add the new item here
+        # Construct the list with MenuItem objects included directly
+        menu_items = [
+            self.status_item,       # Insert the MenuItem object
+            "Sync Now",
+            self.status_panel_item, # Add the new item here
            "View Logs",
            self.synced_projects_item, # Add the new item here
            None,                   # Separator
