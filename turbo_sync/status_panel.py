@@ -70,7 +70,6 @@ class StatusPanel(QDialog):
     # Replace the existing update_status method with this one:
     @Slot(dict)
     def update_status(self, progress_data):
-        """
         """Receives progress updates via signal and updates the table."""
         logger.debug(f"StatusPanel received update: {progress_data}")
         msg_type = progress_data.get('type')
