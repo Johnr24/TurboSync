@@ -731,14 +731,14 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
         # --- Removed clear_status() call from here ---
 
-       # Show and raise the window (whether new or existing)
-       try:
+        # Show and raise the window (whether new or existing)
+        try:
             self.status_panel.show()
             self.status_panel.raise_() # Bring to front
             self.status_panel.activateWindow() # Ensure focus
         except Exception as e:
-             logger.error(f"Error showing/activating status panel: {e}")
-             rumps.notification("TurboSync Error", "Status Panel Error", f"Could not show panel: {e}")
+            logger.error(f"Error showing/activating status panel: {e}")
+            rumps.notification("TurboSync Error", "Status Panel Error", f"Could not show panel: {e}")
 
     # Add or ensure this method exists to handle the panel closing
     def _status_panel_closed(self):
