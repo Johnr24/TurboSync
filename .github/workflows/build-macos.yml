@@ -33,10 +33,10 @@ jobs:
           # Ensure py2app is installed if not in requirements.txt
           pip install py2app
 
-      - name: Install build tools (fswatch, rclone, create-dmg)
+      - name: Install build tools (fswatch, rsync, create-dmg)
         run: |
           brew install fswatch
-          brew install rclone
+          brew install rsync
           brew install create-dmg
 
       - name: Run build script
@@ -54,7 +54,7 @@ jobs:
           chmod -R 755 "${APP_PATH}"
           echo "Ensuring bundled binaries are executable..."
           chmod +x "${APP_PATH}/Contents/MacOS/fswatch" || echo "Warning: Failed to chmod fswatch"
-          chmod +x "${APP_PATH}/Contents/MacOS/rclone" || echo "Warning: Failed to chmod rclone"
+          chmod +x "${APP_PATH}/Contents/MacOS/rsync" || echo "Warning: Failed to chmod rclone"
           echo "Permissions fixed."
 
       # --- Release Steps (only run on tag push) ---
