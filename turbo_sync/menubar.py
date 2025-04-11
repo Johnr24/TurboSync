@@ -295,11 +295,13 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 self.watch_toggle.state = False # Update the correct item's state
                 self.watch_enabled = False
 
-        self.perform_sync_task() # Call the task handler
+        # self.perform_sync_task() # Don't call automatically here, wait for click
 
     # --- New perform_sync_task method (replaces old one and _check_sync_progress/_update_status_after_sync) ---
-    def perform_sync_task(self):
-        """Handles the execution of the sync process in a separate thread."""
+    @rumps.clicked("Sync Now") # Add decorator
+    def perform_sync_task(self, sender=None): # Add sender argument
+        """Handles the execution of the sync process in a separate thread. Triggered by 'Sync Now' click or scheduled sync."""
+        # Log sender if needed: logging.debug(f"perform_sync_task triggered by: {sender}")
         if self.is_syncing:
             logging.warning("Sync task requested, but sync is already in progress.")
             rumps.notification("Sync In Progress", "", "A synchronization task is already running.")
