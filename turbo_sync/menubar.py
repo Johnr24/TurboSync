@@ -317,8 +317,17 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         # Consider disabling the "Sync Now" menu item temporarily if needed
         # self.menu["Sync Now"].set_callback(None) # Example: Disable callback
 
-        # Show the status panel (this also clears it)
-        self.show_status_panel()
+        # Ensure the status panel exists and clear it before starting sync
+        if self.status_panel:
+            logger.debug("Clearing existing status panel before new sync.")
+            self.status_panel.clear_status()
+        else:
+            # If panel doesn't exist, show_status_panel will create it later if needed
+            # or if the user clicks the menu item.
+            pass
+
+        # Show the status panel (it will be cleared or newly created)
+        self.show_status_panel() # Ensure it's visible for the new sync
 
         # Define the target function for the background thread
         def sync_thread_target():
@@ -716,17 +725,14 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 logger.exception("Failed to create StatusPanel instance.")
                 rumps.notification("TurboSync Error", "Status Panel Error", f"Could not create panel: {e}")
                 return # Don't proceed if creation failed
-        else:
-            logger.info("Status Panel instance already exists.")
+       else:
+           # Instance exists, just ensure it's visible
+           logger.info("Status Panel instance already exists. Showing it.")
 
-        # Clear previous results before showing
-        try:
-            self.status_panel.clear_status()
-        except Exception as e:
-             logger.error(f"Error calling clear_status on panel: {e}")
+       # --- Removed clear_status() call from here ---
 
-        # Show and raise the window
-        try:
+       # Show and raise the window (whether new or existing)
+       try:
             self.status_panel.show()
             self.status_panel.raise_() # Bring to front
             self.status_panel.activateWindow() # Ensure focus
