@@ -147,9 +147,9 @@ QPushButton:pressed {
                 "WATCH_LOCAL_FILES": ("Watch Local Files:", QCheckBox, True),
                 "WATCH_DELAY_SECONDS": ("Watch Delay (seconds):", QSpinBox, 2), # Use QSpinBox
             }),
-            ("Rclone", {
+            ("Rsync", { # Renamed Group Box
                 # Use QPlainTextEdit for multi-line options
-                "RCLONE_OPTIONS": ("Rclone Options:", QPlainTextEdit, "--progress --transfers=32 --checkers=64 --buffer-size=256M --bidir"),
+                "RSYNC_OPTIONS": ("Rsync Options:", QPlainTextEdit, "-avz --progress --delete"), # Updated key, label, and default
             }),
             ("Application Behavior", { # New Group Box
                 "START_AT_LOGIN": ("Start TurboSync at Login:", QCheckBox, False),
