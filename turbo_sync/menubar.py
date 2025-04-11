@@ -19,19 +19,25 @@ from collections import OrderedDict # To maintain setting order
 
 from turbo_sync.sync import perform_sync, load_config, find_livework_dirs # Absolute import, added find_livework_dirs
 from turbo_sync.watcher import FileWatcher, is_fswatch_available, get_fswatch_config # Absolute import
-import multiprocessing # Import multiprocessing for Queue and Manager
+# import multiprocessing # Import multiprocessing for Queue and Manager # Removed
 import textwrap # For formatting long messages
 from turbo_sync.utils import get_resource_path # Import from utils
 # --- Import the Settings Dialog logic ---
 from turbo_sync.settings_dialog import launch_pyside_settings_dialog # Import the launcher function
 # --- Imports needed for Status Panel ---
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication # Keep QApplication
+from PySide6.QtCore import QObject, Signal # Add QObject, Signal
 from turbo_sync.status_panel import StatusPanel
 
 # Define user-specific config path (consistent with main.py)
 APP_NAME = "TurboSync"
 USER_CONFIG_DIR = os.path.expanduser(f'~/Library/Application Support/{APP_NAME}')
 USER_ENV_PATH = os.path.join(USER_CONFIG_DIR, '.env')
+
+# Add this class definition ABOVE the TurboSyncMenuBar class definition
+class SyncSignalEmitter(QObject):
+    """Helper class to emit signals for sync progress."""
+    sync_progress_update = Signal(dict) # Signal payload is a dictionary
 
 class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
     def __init__(self):
@@ -66,19 +72,20 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
         logging.debug("Setting up menu items")
         # State variables (define before menu items that might use them)
-        self.syncing = False
+        self.is_syncing = False # Use this instead of self.syncing
         self.sync_thread = None
         # self.status_item = None # Defined below
         self.last_sync_status = "Never synced"
         self.file_watcher = None
         self.watch_enabled = False # Will be updated by setup_file_watcher
         self.last_sync_results = {} # Store detailed results {path: {'success': bool, 'synced_files': [], 'error': 'msg', 'error_type': 'optional_str'}}
-        self.active_sync_progress = {} # Store current progress {path: percentage}
-        # Use Manager().Queue() for inter-process communication with ProcessPoolExecutor
-        self.manager = multiprocessing.Manager()
-        self.progress_queue = self.manager.Queue() # Queue for sync progress
-        self.progress_timer = None # Timer to check the queue
-        self.status_panel_window = None # Reference to the status panel window
+        # self.active_sync_progress = {} # Store current progress {path: percentage} # Removed
+        # Use Manager().Queue() for inter-process communication with ProcessPoolExecutor # Removed
+        # self.manager = multiprocessing.Manager() # Removed
+        # self.progress_queue = self.manager.Queue() # Queue for sync progress # Removed
+        # self.progress_timer = None # Timer to check the queue # Removed
+        self.status_panel = None # Changed from self.status_panel_window
+        self.sync_emitter = SyncSignalEmitter() # Add emitter
 
         # --- Define Items Needing State Management First ---
         self.status_item = rumps.MenuItem(f"Status: {self.last_sync_status}")
@@ -212,7 +219,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
     def on_files_changed(self):
         """Callback for when files change"""
         logging.debug("File changes detected")
-        if not self.syncing:
+        if not self.is_syncing: # Use correct flag
             logging.info("Starting sync due to file changes")
             rumps.notification( # Reverted to rumps.notification
                 "TurboSync",
@@ -284,12 +291,145 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 self.watch_enabled = False
 
     @rumps.clicked("Sync Now") # Keep decorator
-    def sync_now(self, _):
-        logging.debug("Sync Now clicked")
-        if self.syncing:
-            logging.info("Sync already in progress, ignoring request")
-            rumps.notification( # Reverted to rumps.notification
-                "TurboSync",
+    def sync_now(self, sender): # Keep sender
+        logger.info("'Sync Now' clicked.")
+        self.perform_sync_task() # Call the task handler
+
+    # --- Remove old _check_sync_progress method ---
+    # def _check_sync_progress(self, timer): ... (entire method removed)
+
+    # Replace the existing perform_sync_task method
+    def perform_sync_task(self):
+        """Handles the execution of the sync process in a separate thread."""
+        if self.is_syncing:
+            logging.warning("Sync task requested, but sync is already in progress.")
+            rumps.notification("Sync In Progress", "", "A synchronization task is already running.")
+            # Ensure panel is visible if sync is ongoing and panel exists
+            if self.status_panel and not self.status_panel.isVisible():
+                self.show_status_panel()
+            return
+
+        logger.info("Starting sync task...")
+        self.is_syncing = True
+        # Update UI to indicate syncing (e.g., disable button, change icon/status)
+        self.status_item.title = "Status: Syncing..."
+        # Consider disabling the "Sync Now" menu item temporarily if needed
+        # self.menu["Sync Now"].set_callback(None) # Example: Disable callback
+
+        # Show the status panel (this also clears it)
+        self.show_status_panel()
+
+        # Define the target function for the background thread
+        def sync_thread_target():
+            logger.info("Sync thread started.")
+            final_results = None
+            overall_success = False
+            sync_message = "Sync finished."
+            try:
+                # Pass the signal emitter to perform_sync
+                # perform_sync now returns the results dictionary or None on config error
+                # NOTE: Assumes perform_sync is updated to accept 'signal_emitter'
+                final_results = perform_sync(signal_emitter=self.sync_emitter)
+
+                # --- Sync Finished ---
+                if final_results is not None: # Check if sync ran (wasn't a config error)
+                    successful_syncs = sum(1 for res in final_results.values() if res.get('success', False))
+                    total_dirs = len(final_results)
+                    overall_success = total_dirs == 0 or successful_syncs == total_dirs
+                    if total_dirs == 0:
+                        sync_message = "No projects found to sync."
+                    elif overall_success:
+                        sync_message = f"Synced {successful_syncs}/{total_dirs} projects successfully."
+                    else:
+                        sync_message = f"Sync completed with {total_dirs - successful_syncs} failures out of {total_dirs} projects."
+
+                    logger.info(f"Sync task completed in thread. {sync_message}")
+                    # Show notification (safe from thread)
+                    rumps.notification(
+                        "TurboSync",
+                        "Sync Complete" if overall_success else "Sync Finished with Errors",
+                        sync_message,
+                        sound=not overall_success # Sound on failure
+                    )
+                    # Optionally emit one final signal for overall completion if needed by panel
+                    # self.sync_emitter.sync_progress_update.emit({
+                    #     'type': 'overall_end', 'success': overall_success,
+                    #     'message': sync_message
+                    # })
+                else:
+                    # perform_sync returned None (config error or major exception)
+                    logger.error("Sync task failed with configuration or unexpected error.")
+                    overall_success = False
+                    sync_message = "Sync failed due to error. Check logs."
+                    rumps.notification("TurboSync Sync Failed", sync_message, "", sound=True)
+                    # Optionally emit final failure signal
+                    # self.sync_emitter.sync_progress_update.emit({
+                    #     'type': 'overall_end', 'success': False, 'message': sync_message
+                    # })
+
+            except Exception as e:
+                logger.error(f"Exception in sync thread target: {e}")
+                logger.exception("Traceback:")
+                overall_success = False
+                sync_message = f"Error during sync: {e}"
+                rumps.notification("TurboSync Sync Error", sync_message, "", sound=True)
+                # Optionally emit final failure signal
+                # self.sync_emitter.sync_progress_update.emit({
+                #     'type': 'overall_end', 'success': False, 'message': sync_message
+                # })
+            finally:
+                # This block runs regardless of success or failure in the thread
+                # Schedule the final UI update on the main thread using a timer
+                update_callback = functools.partial(
+                    self._finalize_sync_ui,
+                    overall_success,
+                    sync_message,
+                    final_results # Pass results for potential future use
+                )
+                rumps.Timer(update_callback, 0.1).start()
+                logger.debug("Scheduled final UI update from sync thread.")
+
+        # Create and start the thread
+        self.sync_thread = threading.Thread(target=sync_thread_target, daemon=True)
+        self.sync_thread.start()
+
+    # Add this new method to the TurboSyncMenuBar class
+    def _finalize_sync_ui(self, overall_success, sync_message, final_results, timer):
+        """Updates the UI on the main thread after sync completion."""
+        # 'timer' object is passed automatically by rumps.Timer
+        logger.info("Finalizing sync UI on main thread.")
+        self.is_syncing = False
+        self.last_sync_status = f"Last sync: {time.strftime('%H:%M:%S')} - {'Success' if overall_success else 'Failed'}"
+        self.status_item.title = f"Status: {self.last_sync_status}"
+        self.last_sync_results = final_results # Store results if needed
+
+        # Re-enable the "Sync Now" menu item if it was disabled
+        # if self.menu["Sync Now"].callback is None:
+        #    self.menu["Sync Now"].set_callback(self.sync_now)
+
+        # Optional: Update status panel one last time if it's still open
+        # if self.status_panel and self.status_panel.isVisible():
+        #    # Maybe add a final summary message to the panel?
+        #    pass
+
+        logger.info("Sync UI finalized.")
+
+
+    # --- Remove old _update_status_after_sync method ---
+    # def _update_status_after_sync(self, overall_success, sync_message, sync_results, timer): ... (entire method removed)
+
+    def scheduled_sync(self):
+        """Run the scheduled sync if not already syncing"""
+        logging.debug("Scheduled sync triggered")
+        if not self.is_syncing: # Use the correct flag
+            logging.info("Starting scheduled sync")
+            # No need to create thread here, call the task handler
+            self.perform_sync_task()
+        else:
+            logging.debug("Skipping scheduled sync (sync already in progress)")
+
+    @rumps.clicked("View Logs") # Keep decorator
+    def view_logs(self, _):
                 "Sync in Progress",
                 "A sync operation is already running",
                 sound=False
@@ -737,108 +877,63 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
     # --- Status Panel Methods ---
 
-    def _get_combined_status(self):
-        """Gets the status of all known projects for the status panel."""
-        combined = {}
-        # Ensure config is loaded before trying to find directories
-        if not hasattr(self, 'config') or not self.config:
-            logging.warning("Cannot get combined status: config not loaded.")
-            # Return a special entry indicating the config issue
-            return {"config_error": {"name": "Error", "status": "Config Error", "progress": None, "details": "Load configuration first."}}
+    # --- Remove old _get_combined_status method ---
+    # def _get_combined_status(self): ... (entire method removed)
 
+
+    # Replace the existing show_status_panel method
+    def show_status_panel(self, sender=None): # Allow calling without sender
+        """Creates (if needed), connects, clears, and shows the StatusPanel."""
+        # Ensure QApplication instance exists for PySide dialogs
+        app = QApplication.instance()
+        if not app:
+            logging.info("Creating QApplication instance for Status Panel.")
+            # Use sys.argv if available, otherwise empty list
+            app_args = sys.argv if hasattr(sys, 'argv') else []
+            # Ensure it doesn't conflict if rumps already created one?
+            # This might need careful handling depending on rumps/PySide interaction.
+            # For now, assume creating it if needed is okay.
+            app = QApplication(app_args)
+
+        if self.status_panel is None:
+            logger.info("Creating Status Panel instance.")
+            try:
+                self.status_panel = StatusPanel()
+                # Connect the signal from the emitter to the panel's slot
+                self.sync_emitter.sync_progress_update.connect(self.status_panel.update_status)
+                # Connect the panel's closed signal to reset our reference
+                self.status_panel.closed.connect(self._status_panel_closed)
+                logger.info("Status Panel created and signals connected.")
+            except Exception as e:
+                logger.exception("Failed to create StatusPanel instance.")
+                rumps.notification("TurboSync Error", "Status Panel Error", f"Could not create panel: {e}")
+                return # Don't proceed if creation failed
+        else:
+            logger.info("Status Panel instance already exists.")
+
+        # Clear previous results before showing
         try:
-            # Get the definitive list of project directories
-            livework_dirs = sorted(find_livework_dirs(self.config))
-            logging.debug(f"Found {len(livework_dirs)} projects for status panel.")
+            self.status_panel.clear_status()
         except Exception as e:
-            logging.error(f"Error finding livework directories for status panel: {e}")
-            return {"find_error": {"name": "Error", "status": "Project Scan Error", "progress": None, "details": str(e)}}
+             logger.error(f"Error calling clear_status on panel: {e}")
 
-        # Ensure last_sync_results is treated as a dict even if None
-        last_results_dict = self.last_sync_results if isinstance(self.last_sync_results, dict) else {}
-
-        for path in livework_dirs: # Iterate through all known projects
-            name = os.path.basename(path)
-            # Default to 'Up to date' for initial state before first sync
-            status = "Up to date ✅"
-            progress = None
-            details = "Awaiting first sync" # Initial detail message
-
-            # Check active progress first (will override default)
-            if path in self.active_sync_progress:
-                status = "Syncing"
-                progress = self.active_sync_progress[path]
-            # Check last results if not actively syncing
-            elif path in last_results_dict:
-                result_data = last_results_dict[path]
-                if isinstance(result_data, dict):
-                    synced_files = result_data.get('synced_files', []) # Get files list first
-                    if result_data.get('success') is True:
-                        if not synced_files: # No files transferred
-                            status = "Up to date ✅"
-                            details = "Already up to date"
-                        else: # Files were transferred
-                            status = "Success ✅"
-                            details = f"{len(synced_files)} files transferred"
-                    elif result_data.get('success') is False:
-                        status = "Failed ❌" # Add emoji for failure too
-                        details = result_data.get('error', 'Unknown error')
-                        # Truncate long error messages for the panel
-                        if len(details) > 100:
-                            details = details[:97] + "..."
-                else: # Should not happen
-                    status = "Unknown"
-            # If path is not in active progress or last results (e.g., just discovered), show as Idle
-            else:
-                 status = "Idle"
-
-
-            combined[path] = {
-                "name": name,
-                "status": status,
-                "progress": progress,
-                "details": details
-            }
-        return combined
-
-    # @rumps.clicked("Show Sync Status") # Decorator removed, callback set in __init__
-    def show_status_panel(self, sender):
-        """Creates or shows the Sync Status panel."""
-        logging.info("Show Sync Status clicked.")
+        # Show and raise the window
         try:
-            # Ensure QApplication instance exists (needed for PySide)
-            app = QApplication.instance()
-            if not app:
-                logging.debug("Creating QApplication instance for Status Panel.")
-                # Pass sys.argv or an empty list if running bundled/without args
-                app = QApplication(sys.argv if hasattr(sys, 'argv') else [])
-
-            if self.status_panel_window is None:
-                logging.debug("Creating new StatusPanel window.")
-                self.status_panel_window = StatusPanel()
-                # Connect the closed signal to our handler
-                self.status_panel_window.closed.connect(self._status_panel_closed)
-                # Update with current status immediately
-                combined_status = self._get_combined_status()
-                self.status_panel_window.update_status(combined_status)
-                self.status_panel_window.show()
-            else:
-                logging.debug("Showing existing StatusPanel window.")
-                # Update with current status before showing
-                combined_status = self._get_combined_status()
-                self.status_panel_window.update_status(combined_status)
-                self.status_panel_window.show()
-                self.status_panel_window.raise_() # Bring to front
-                self.status_panel_window.activateWindow() # Ensure focus
-
+            self.status_panel.show()
+            self.status_panel.raise_() # Bring to front
+            self.status_panel.activateWindow() # Ensure focus
         except Exception as e:
-            logging.exception("Failed to create or show Status Panel")
-            rumps.notification("TurboSync Error", "Status Panel Error", f"Could not open status panel: {e}")
+             logger.error(f"Error showing/activating status panel: {e}")
+             rumps.notification("TurboSync Error", "Status Panel Error", f"Could not show panel: {e}")
 
+    # Add or ensure this method exists to handle the panel closing
     def _status_panel_closed(self):
         """Slot called when the status panel emits the 'closed' signal (is hidden)."""
-        logging.debug("Status panel reported closed (hidden).")
-        # We keep the reference self.status_panel_window, as the window is hidden, not deleted.
+        logging.debug("Status panel reported closed (hidden). Resetting reference.")
+        # Set reference to None so it gets recreated next time if needed.
+        # Or keep the reference if you want to reuse the same hidden window.
+        # For simplicity, let's recreate it.
+        self.status_panel = None
 
     # --- End Status Panel Methods ---
 
