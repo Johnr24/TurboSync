@@ -29,6 +29,9 @@ from PySide6.QtWidgets import QApplication # Keep QApplication
 from PySide6.QtCore import QObject, Signal # Add QObject, Signal
 from turbo_sync.status_panel import StatusPanel
 
+# Set up module-level logger
+logger = logging.getLogger(__name__)
+
 # Define user-specific config path (consistent with main.py)
 APP_NAME = "TurboSync"
 USER_CONFIG_DIR = os.path.expanduser(f'~/Library/Application Support/{APP_NAME}')
