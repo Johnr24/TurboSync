@@ -8,9 +8,12 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QApplication,
     QSizePolicy,
-    QProgressBar # Add this line
+    QProgressBar,
+    QLabel # Add QLabel for overall status
 )
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Qt, Signal, Slot, QTimer # Add QTimer
+import os # Add os import for basename
+import time # Add time import
 
 logger = logging.getLogger(__name__)
 
