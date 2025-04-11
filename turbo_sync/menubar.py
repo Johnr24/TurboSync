@@ -97,13 +97,12 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         # Synced projects submenu removed
 
         # --- Define Complete Menu Structure ---
-        self.status_panel_item = rumps.MenuItem("Show Sync Status") # New item
-        self.status_panel_item.set_callback(self.show_status_panel) # Explicitly set callback
+        # Removed self.status_panel_item definition
         # Construct the list with MenuItem objects included directly
         menu_items = [
             self.status_item,       # Insert the MenuItem object
             "Sync Now",
-            self.status_panel_item, # Add the new item here
+            # Removed self.status_panel_item from list
            "View Logs",
            # Synced projects submenu removed
            None,                   # Separator
@@ -111,7 +110,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             "Settings",
             None,                   # Separator
             # Quit item added by rumps automatically
-            rumps.MenuItem("Open Sync Dashboard", callback=self.show_status_panel) # Added here
+            rumps.MenuItem("Open Sync Status Dashboard", callback=self.show_status_panel) # Renamed here
         ]
         self.menu = menu_items      # Assign the final list to self.menu
         # Removed self.menu.append(...) line
