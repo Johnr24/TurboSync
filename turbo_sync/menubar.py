@@ -107,9 +107,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             "Settings",
             None,                   # Separator
             # Quit item added by rumps automatically
+            rumps.MenuItem("Open Sync Dashboard", callback=self.show_status_panel) # Added here
         ]
         self.menu = menu_items      # Assign the final list to self.menu
-        self.menu.append(rumps.MenuItem("Open Sync Dashboard", callback=self.show_status_panel))
+        # Removed self.menu.append(...) line
 
         # Synced projects submenu removed
 
