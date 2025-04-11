@@ -54,7 +54,7 @@ jobs:
           chmod -R 755 "${APP_PATH}"
           echo "Ensuring bundled binaries are executable..."
           chmod +x "${APP_PATH}/Contents/MacOS/fswatch" || echo "Warning: Failed to chmod fswatch"
-          chmod +x "${APP_PATH}/Contents/MacOS/rsync" || echo "Warning: Failed to chmod rclone"
+          chmod +x "${APP_PATH}/Contents/MacOS/rsync" || echo "Warning: Failed to chmod rsync" # Updated comment
           echo "Permissions fixed."
 
       # --- Release Steps (only run on tag push) ---
