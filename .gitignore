@@ -23,3 +23,5 @@ __pycache__/
 turbosync.rb
 /homebrew-turbosync
 .aider*
+
+turbosync/__pycache__
