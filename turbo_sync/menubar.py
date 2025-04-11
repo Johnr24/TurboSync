@@ -421,24 +421,20 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
     @rumps.clicked("View Logs") # Keep decorator
     def view_logs(self, _):
-                "Sync in Progress",
-                "A sync operation is already running",
-                sound=False
-            )
-            return
-
-        logging.info("Starting sync thread")
-        self.sync_thread = threading.Thread(target=self.perform_sync_task)
-        self.sync_thread.start()
-
-    # --- Helper Functions for Login Item ---
-
-    def _get_app_path(self):
+        """Opens the application's log file."""
         logging.debug("View Logs clicked")
         log_path = os.path.expanduser('~/Library/Logs/TurboSync/turbosync.log')
         if os.path.exists(log_path):
             logging.info(f"Opening log file at: {log_path}")
-            os.system(f"open {log_path}")
+            # Use subprocess.run for better control and security than os.system
+            try:
+                subprocess.run(['open', log_path], check=True)
+            except subprocess.CalledProcessError as e:
+                logging.error(f"Failed to open log file with 'open': {e}")
+                rumps.notification("TurboSync Error", "Log Open Failed", f"Could not open log file: {e}")
+            except FileNotFoundError:
+                 logging.error("The 'open' command was not found.")
+                 rumps.notification("TurboSync Error", "Log Open Failed", "The 'open' command is not available.")
         else:
             logging.warning(f"Log file not found at: {log_path}")
             rumps.notification( # Reverted to rumps.notification
@@ -451,6 +447,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
     # --- Synced Projects Submenu Removed ---
 
     # --- Helper Functions for Login Item ---
+
+    # Note: The _get_app_path function definition starts below correctly.
 
     def _get_app_path(self):
         """Determines the path to the running application bundle (.app)."""
