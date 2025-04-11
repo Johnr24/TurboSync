@@ -161,7 +161,7 @@ def build_app(args):
     # Find required binaries needed for bundling
     print("Locating required binaries (fswatch, rsync)...") # Changed rclone to rsync
     fswatch_path = find_required_binary("fswatch")
-    rsync_path = find_required_binary("rsync") # Changed rclone to rsync
+    rsync_path = find_required_binary("rsync") # Changed to rsync
     print("Required binaries located successfully.")
 
     # Make sure dependencies are installed
