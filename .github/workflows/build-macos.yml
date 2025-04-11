@@ -40,7 +40,7 @@ jobs:
           brew install create-dmg
 
       - name: Run build script
-        run: python build_app.py --non-interactive # Execute build script non-interactively (fswatch/rclone pre-installed)
+        run: python build_app.py --non-interactive # Execute build script non-interactively (fswatch/rsybc pre-installed)
 
       # Fix ownership, attributes, and permissions on the app bundle for distribution
       - name: Fix app permissions
