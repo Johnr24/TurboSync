@@ -258,7 +258,7 @@ def list_remote_directory(config):
             logger.error(f"Error listing remote directory: {e.stderr}")
             return False
 
-def sync_directory(remote_dir_info, local_base_dir, config, signal_emitter=None):
+def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None):
     """
     Sync a specific remote directory to a local directory using rsync.
 
@@ -266,7 +266,7 @@ def sync_directory(remote_dir_info, local_base_dir, config, signal_emitter=None)
         remote_dir_info (tuple): A tuple containing (index, remote_path).
         local_base_dir (str): The base local directory to sync into.
         config (dict): The loaded configuration dictionary.
-        signal_emitter (SyncSignalEmitter, optional): Emitter to send progress updates via signals.
+        progress_queue (multiprocessing.Queue, optional): Queue to send progress updates.
 
     Returns:
         tuple: (remote_path, result_data) where result_data contains success status and details.
@@ -340,15 +340,11 @@ def sync_directory(remote_dir_info, local_base_dir, config, signal_emitter=None)
     logger.debug(f"Rsync command for '{remote_path}': {' '.join(rsync_cmd)}")
 
     # --- Report Start ---
-    if signal_emitter:
+    if progress_queue:
         try:
-            # Emit signal directly (must be called from the main thread or use Qt's queued connections)
-            # Since this runs in a worker process, direct emit might not work as expected
-            # unless the emitter is designed for cross-process signaling or handled carefully.
-            # For now, assuming it's handled correctly by the caller's setup (e.g., queued connection).
-            signal_emitter.sync_progress_update.emit({'type': 'start', 'project': project_name, 'path': remote_path})
-        except Exception as emit_err:
-            logger.error(f"Failed to emit start signal for {project_name}: {emit_err}")
+            progress_queue.put({'type': 'start', 'project': project_name, 'path': remote_path})
+        except Exception as q_err:
+            logger.error(f"Failed to put start message on queue for {project_name}: {q_err}")
     # --- End Report Start ---
 
     success = False # Default to failure
@@ -400,20 +396,20 @@ def sync_directory(remote_dir_info, local_base_dir, config, signal_emitter=None)
                 progress_match = progress_regex.search(line)
                 if progress_match:
                     percentage = int(progress_match.group(1))
-                    # Only report if percentage changes to avoid flooding the emitter
+                    # Only report if percentage changes to avoid flooding the queue
                     if percentage != last_reported_percentage:
                         logger.debug(f"Parsed progress for {project_name}: {percentage}%")
-                        if signal_emitter:
+                        if progress_queue:
                             try:
-                                signal_emitter.sync_progress_update.emit({
+                                progress_queue.put({
                                     'type': 'progress',
                                     'project': project_name,
                                     'path': remote_path,
                                     'percentage': percentage
                                 })
                                 last_reported_percentage = percentage
-                            except Exception as emit_err:
-                                logger.error(f"Failed to emit progress signal for {project_name}: {emit_err}")
+                            except Exception as q_err:
+                                logger.error(f"Failed to put progress message on queue for {project_name}: {q_err}")
                     continue # Progress lines don't contain itemize info
 
                 # Check for itemized change (file transfer)
@@ -468,12 +464,12 @@ def sync_directory(remote_dir_info, local_base_dir, config, signal_emitter=None)
                 process.kill() # Force kill if terminate fails
     finally:
         # --- Report End ---
-        if signal_emitter:
+        if progress_queue:
             try:
-                # Emit end signal
-                signal_emitter.sync_progress_update.emit({'type': 'end', 'project': project_name, 'path': remote_path, 'success': success, 'error': error_message if not success else None})
-            except Exception as emit_err:
-                logger.error(f"Failed to emit end signal for {project_name}: {emit_err}")
+                # Put end message on queue
+                progress_queue.put({'type': 'end', 'project': project_name, 'path': remote_path, 'success': success, 'error': error_message if not success else None})
+            except Exception as q_err:
+                logger.error(f"Failed to put end message on queue for {project_name}: {q_err}")
         # --- End Report End ---
 
     # Return detailed result dictionary
@@ -490,12 +486,12 @@ def sync_directory(remote_dir_info, local_base_dir, config, signal_emitter=None)
 
     return (remote_path, result_data) # Return path and result dictionary
 
-def perform_sync(signal_emitter=None):
+def perform_sync(progress_queue=None):
     """
     Main function to perform synchronization using rsync, potentially in parallel.
 
     Args:
-        signal_emitter (SyncSignalEmitter, optional): Emitter for sending progress updates via signals.
+        progress_queue (multiprocessing.Queue, optional): Queue for sending progress updates.
 
     Returns:
         dict: A dictionary mapping remote directory paths to their sync result data.
@@ -562,7 +558,7 @@ def perform_sync(signal_emitter=None):
             sync_func = partial(sync_directory,
                                 local_base_dir=config['local_dir'],
                                 config=config,
-                                signal_emitter=signal_emitter) # Pass the signal_emitter here
+                                progress_queue=progress_queue) # Pass the progress_queue here
 
             # Execute tasks and gather results as they complete
             results_iterator = executor.map(sync_func, tasks)

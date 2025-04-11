@@ -7,6 +7,7 @@ import logging
 import shutil # Import shutil
 import rumps
 import subprocess # Added for AppleScript execution
+import multiprocessing # Import multiprocessing for Queue and Manager
 # Removed explicit component imports for rumps 0.4.0
 # from rumps import separator, Text, EditText, Checkbox, Window, MenuItem, App, notification, quit_application
 import schedule
@@ -83,10 +84,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.watch_enabled = False # Will be updated by setup_file_watcher
         self.last_sync_results = {} # Store detailed results {path: {'success': bool, 'synced_files': [], 'error': 'msg', 'error_type': 'optional_str'}}
         # self.active_sync_progress = {} # Store current progress {path: percentage} # Removed
-        # Use Manager().Queue() for inter-process communication with ProcessPoolExecutor # Removed
-        # self.manager = multiprocessing.Manager() # Removed
-        # self.progress_queue = self.manager.Queue() # Queue for sync progress # Removed
-        # self.progress_timer = None # Timer to check the queue # Removed
+        # Use Manager().Queue() for inter-process communication with ProcessPoolExecutor
+        self.manager = multiprocessing.Manager()
+        self.progress_queue = self.manager.Queue() # Queue for sync progress
+        self.progress_timer = None # Timer to check the queue
         self.status_panel = None # Changed from self.status_panel_window
         self.sync_emitter = SyncSignalEmitter() # Add emitter
 
@@ -327,9 +328,11 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             overall_success = False
             sync_message = "Sync finished."
             try:
-                # Pass the signal emitter to perform_sync
-                # NOTE: Assumes perform_sync is updated to accept 'signal_emitter'
-                final_results = perform_sync(signal_emitter=self.sync_emitter)
+                # Start the timer to check the progress queue
+                self._start_progress_timer()
+
+                # Pass the progress queue to perform_sync
+                final_results = perform_sync(progress_queue=self.progress_queue)
 
                 # --- Sync Finished ---
                 if final_results is not None: # Check if sync ran (wasn't a config error)
@@ -379,6 +382,9 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 # })
             finally:
                 # This block runs regardless of success or failure in the thread
+                # Stop the progress timer before scheduling the final UI update
+                self._stop_progress_timer()
+
                 # Schedule the final UI update on the main thread using a timer
                 update_callback = functools.partial(
                     self._finalize_sync_ui,
@@ -386,6 +392,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                     sync_message,
                     final_results # Pass results for potential future use
                 )
+                # Use rumps.Timer for one-shot callback
                 rumps.Timer(update_callback, 0.1).start()
                 logger.debug("Scheduled final UI update from sync thread.")
 
@@ -413,6 +420,45 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         #    pass
 
         logger.info("Sync UI finalized.")
+
+    # --- Progress Queue Handling ---
+    def _start_progress_timer(self):
+        """Starts the timer to periodically check the progress queue."""
+        if self.progress_timer is None:
+            logger.debug("Starting progress queue timer.")
+            # Check queue every 200ms
+            self.progress_timer = rumps.Timer(self._check_progress_queue, 0.2)
+            self.progress_timer.start()
+        else:
+            logger.debug("Progress timer already running.")
+
+    def _stop_progress_timer(self):
+        """Stops the progress queue timer."""
+        if self.progress_timer is not None:
+            logger.debug("Stopping progress queue timer.")
+            self.progress_timer.stop()
+            self.progress_timer = None
+            # Process any remaining items in the queue one last time
+            self._check_progress_queue(None) # Pass None as timer object
+
+    def _check_progress_queue(self, timer):
+        """Checks the progress queue and emits signals for UI updates."""
+        # 'timer' object is passed automatically by rumps.Timer
+        try:
+            while not self.progress_queue.empty():
+                progress_data = self.progress_queue.get_nowait()
+                logger.debug(f"Got progress from queue: {progress_data}")
+                # Emit the signal using the emitter (safe from main thread)
+                self.sync_emitter.sync_progress_update.emit(progress_data)
+        except multiprocessing.queues.Empty:
+            # Queue is empty, nothing to do
+            pass
+        except Exception as e:
+            logger.error(f"Error checking progress queue: {e}")
+            # Consider stopping the timer if errors persist
+            # self._stop_progress_timer()
+
+    # --- End Progress Queue Handling ---
 
     # --- Update scheduled_sync ---
     def scheduled_sync(self):
