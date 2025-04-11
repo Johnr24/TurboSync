@@ -290,239 +290,131 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 self.watch_toggle.state = False # Update the correct item's state
                 self.watch_enabled = False
 
-    @rumps.clicked("Sync Now") # Keep decorator
-    def sync_now(self, sender): # Keep sender
-        logger.info("'Sync Now' clicked.")
-    def _check_sync_progress(self, timer):
-        """Callback for the progress timer to check the queue."""
-        if not self.syncing:
-            logging.debug("Syncing stopped, stopping progress timer.")
-            if self.progress_timer:
-                self.progress_timer.stop()
-                self.progress_timer = None
-            return # Stop checking if sync is no longer active
+        self.perform_sync_task() # Call the task handler
 
-        try:
-            while not self.progress_queue.empty():
-                message = self.progress_queue.get_nowait()
-                if message and isinstance(message, dict):
-                    msg_type = message.get('type')
-                    project_name = message.get('project', 'Unknown Project')
-                    if msg_type == 'start':
-                        logging.info(f"Progress: Started syncing {project_name}")
-                        # Update status immediately - safe within timer callback on main thread
-                        self.status_item.title = f"Status: Syncing {project_name}..."
-                    elif msg_type == 'progress':
-                        percentage = message.get('percentage')
-                        path = message.get('path')
-                        if path is not None and percentage is not None:
-                            logging.debug(f"Progress Update: {project_name} at {percentage}%")
-                            self.active_sync_progress[path] = percentage
-                            # Synced projects submenu removed
-                    elif msg_type == 'end':
-                        path = message.get('path')
-                        success = message.get('success') # Get success status from message
-                        success_status = "successfully" if success else "with errors"
-                        logging.info(f"Progress: Finished syncing {project_name} {success_status}")
-                        # Remove from active progress (end message means sync process for this dir finished)
-                        if path in self.active_sync_progress:
-                            del self.active_sync_progress[path]
-                        # NOTE: The final result dict (with files/errors) is now aggregated in perform_sync
-                        # and stored in self.last_sync_results after the sync thread finishes.
-                        # We just need to trigger a UI update here to show the final state icon (✅/❌/etc.)
-                        # We can temporarily store the simple success/fail here if needed for immediate UI update,
-                        # but it will be overwritten by the full results later.
-                        # Let's rely on the final update after perform_sync finishes.
-                        # Synced projects submenu removed
+    # --- New perform_sync_task method (replaces old one and _check_sync_progress/_update_status_after_sync) ---
+    def perform_sync_task(self):
+        """Handles the execution of the sync process in a separate thread."""
+        if self.is_syncing:
+            logging.warning("Sync task requested, but sync is already in progress.")
+            rumps.notification("Sync In Progress", "", "A synchronization task is already running.")
+            # Ensure panel is visible if sync is ongoing and panel exists
+            if self.status_panel and not self.status_panel.isVisible():
+                self.show_status_panel()
+            return
 
-        except multiprocessing.queues.Empty:
-            pass # Queue is empty, nothing to do
-        except Exception as e:
-            logging.error(f"Error checking progress queue: {e}") # Corrected indentation
+        logger.info("Starting sync task...")
+        self.is_syncing = True
+        # Update UI to indicate syncing (e.g., disable button, change icon/status)
+        self.status_item.title = "Status: Syncing..."
+        # Consider disabling the "Sync Now" menu item temporarily if needed
+        # self.menu["Sync Now"].set_callback(None) # Example: Disable callback
 
-        # Update status panel if visible # Corrected indentation
-        if self.status_panel_window and self.status_panel_window.isVisible(): # Corrected indentation
+        # Show the status panel (this also clears it)
+        self.show_status_panel()
+
+        # Define the target function for the background thread
+        def sync_thread_target():
+            logger.info("Sync thread started.")
+            final_results = None
+            overall_success = False
+            sync_message = "Sync finished."
             try:
-                combined_status = self._get_combined_status()
-                self.status_panel_window.update_status(combined_status)
-            except Exception as panel_update_err:
-                logging.error(f"Error updating status panel during progress check: {panel_update_err}")
+                # Pass the signal emitter to perform_sync
+                # NOTE: Assumes perform_sync is updated to accept 'signal_emitter'
+                final_results = perform_sync(signal_emitter=self.sync_emitter)
 
-    def perform_sync_task(self): # Corrected indentation
-        """Run the sync in a separate thread and schedule UI updates.""" # Corrected indentation
-        logging.debug("Starting sync task")
-        self.syncing = True
+                # --- Sync Finished ---
+                if final_results is not None: # Check if sync ran (wasn't a config error)
+                    successful_syncs = sum(1 for res in final_results.values() if res.get('success', False))
+                    total_dirs = len(final_results)
+                    overall_success = total_dirs == 0 or successful_syncs == total_dirs
+                    if total_dirs == 0:
+                        sync_message = "No projects found to sync."
+                    elif overall_success:
+                        sync_message = f"Synced {successful_syncs}/{total_dirs} projects successfully."
+                    else:
+                        sync_message = f"Sync completed with {total_dirs - successful_syncs} failures out of {total_dirs} projects."
 
-        # Start the progress checking timer (runs every 0.5 seconds)
-        if self.progress_timer is None:
-             logging.debug("Starting progress timer.")
-             self.progress_timer = rumps.Timer(self._check_sync_progress, 0.5)
-             self.progress_timer.start()
-        else:
-             logging.warning("Progress timer already exists, not starting again.")
-
-
-        # Initial status update (safe from background thread before long operation)
-        try:
-            self.status_item.title = "Status: Starting sync..." # More generic start message
-        except Exception as ui_err:
-            # Log if the initial status update fails, but proceed with sync
-            logging.error(f"Failed to set initial 'Starting sync...' status: {ui_err}")
-
-        overall_success = False # Default overall status
-        sync_results = None # Store detailed results here
-        sync_message = "Sync did not run or failed unexpectedly." # Default message for overall status
-
-        try:
-            # --- Call the core sync logic, passing the queue ---
-            logging.debug("Calling perform_sync() with progress queue...")
-            sync_results = perform_sync(progress_queue=self.progress_queue) # Pass the queue
-            logging.debug(f"perform_sync() returned: {sync_results}")
-
-            # Determine overall success and message based on detailed results
-            if isinstance(sync_results, dict):
-                total_dirs = len(sync_results)
-                successful_syncs = sum(1 for success in sync_results.values() if success)
-                overall_success = total_dirs == 0 or successful_syncs == total_dirs # True if no dirs or all succeeded
-                if total_dirs == 0:
-                    sync_message = "No projects found to sync."
-                elif overall_success:
-                    sync_message = f"Synced {successful_syncs}/{total_dirs} projects successfully."
+                    logger.info(f"Sync task completed in thread. {sync_message}")
+                    # Show notification (safe from thread)
+                    rumps.notification(
+                        "TurboSync",
+                        "Sync Complete" if overall_success else "Sync Finished with Errors",
+                        sync_message,
+                        sound=not overall_success # Sound on failure
+                    )
+                    # Optionally emit one final signal for overall completion if needed by panel
+                    # self.sync_emitter.sync_progress_update.emit({
+                    #     'type': 'overall_end', 'success': overall_success,
+                    #     'message': sync_message
+                    # })
                 else:
-                    sync_message = f"Sync completed with {total_dirs - successful_syncs} failures out of {total_dirs} projects."
-            else:
-                # perform_sync returned None (config error or major exception)
+                    # perform_sync returned None (config error or major exception)
+                    logger.error("Sync task failed with configuration or unexpected error.")
+                    overall_success = False
+                    sync_message = "Sync failed due to error. Check logs."
+                    rumps.notification("TurboSync Sync Failed", sync_message, "", sound=True)
+                    # Optionally emit final failure signal
+                    # self.sync_emitter.sync_progress_update.emit({
+                    #     'type': 'overall_end', 'success': False, 'message': sync_message
+                    # })
+
+            except Exception as e:
+                logger.error(f"Exception in sync thread target: {e}")
+                logger.exception("Traceback:")
                 overall_success = False
-                sync_message = "Sync failed due to configuration or system error."
-
-            # --- Show Notification based on sync result (safe from background thread) ---
-            # Notifications are generally thread-safe in rumps/macOS
-            if overall_success:
-                logging.info(f"Sync completed successfully: {sync_message}")
-                try:
-                    rumps.notification(
-                        "TurboSync",
-                        "Sync Completed",
-                        sync_message,
-                        sound=False
-                    )
-                except Exception as ne:
-                    logging.error(f"Failed to show success notification: {ne}")
-            else:
-                logging.error(f"Sync failed: {sync_message}")
-                try:
-                    rumps.notification(
-                        "TurboSync",
-                        "Sync Failed",
-                        sync_message,
-                        sound=True
-                    )
-                except Exception as ne:
-                    logging.error(f"Failed to show failure notification: {ne}")
-
-        except Exception as e:
-            # --- Handle exceptions during perform_sync() itself ---
-            # This catch block might be less likely to be hit now that perform_sync handles its own exceptions,
-            # but kept for safety.
-            logging.exception(f"Unexpected exception during perform_sync call: {e}")
-            overall_success = False # Ensure success is false on exception
-            sync_message = f"An error occurred during sync: {str(e)}" # Use message from exception
-            try:
-                # Try to show an error notification for this specific exception
-                rumps.notification(
-                    "TurboSync",
-                    "Sync Error",
-                    sync_message,
-                    sound=True
-                )
-            except Exception as ne:
-                 logging.error(f"Failed to show error notification after exception: {ne}")
-
-        finally:
-            # --- Schedule Final UI Update on Main Thread ---
-            # This block runs regardless of whether an exception occurred in the try block.
-            # It ensures the status is always updated and syncing flag reset correctly.
-            logging.debug(f"Scheduling final status update via timer with overall_success={overall_success}")
-            try:
-                # Use functools.partial to pass data to the callback
+                sync_message = f"Error during sync: {e}"
+                rumps.notification("TurboSync Sync Error", sync_message, "", sound=True)
+                # Optionally emit final failure signal
+                # self.sync_emitter.sync_progress_update.emit({
+                #     'type': 'overall_end', 'success': False, 'message': sync_message
+                # })
+            finally:
+                # This block runs regardless of success or failure in the thread
+                # Schedule the final UI update on the main thread using a timer
                 update_callback = functools.partial(
-                    self._update_status_after_sync,
+                    self._finalize_sync_ui,
                     overall_success,
                     sync_message,
-                    sync_results
+                    final_results # Pass results for potential future use
                 )
-                # Use a very short interval (e.g., 0.1s) just to defer execution to the main loop
                 rumps.Timer(update_callback, 0.1).start()
-                logging.debug("Timer scheduled for final status update.")
-            except Exception as timer_e:
-                # If scheduling the timer fails, log the error.
-                # The syncing flag might remain True, which is problematic,
-                # but trying to set it here is still unsafe.
-                logging.error(f"CRITICAL: Failed to schedule status update timer: {timer_e}")
-                # Consider adding more robust error handling here if needed,
-                # e.g., trying to set a flag for the main thread to check later.
+                logger.debug("Scheduled final UI update from sync thread.")
 
-        logging.debug("Sync task thread finishing.")
-        # DO NOT update self.status_item.title or self.syncing here.
-        # It will be handled by _update_status_after_sync on the main thread.
+        # Create and start the thread
+        self.sync_thread = threading.Thread(target=sync_thread_target, daemon=True)
+        self.sync_thread.start()
 
-    def _update_status_after_sync(self, overall_success, sync_message, sync_results, timer):
-        """
-        Update status item, syncing flag, and project list on the main thread after sync.
-        Called via functools.partial, so arguments come first, then the timer object.
-        """
-        # Arguments overall_success, sync_message, sync_results are passed via partial
-        # 'timer' is the rumps.Timer object passed automatically to the callback
+    # --- New method to finalize UI updates on main thread ---
+    def _finalize_sync_ui(self, overall_success, sync_message, final_results, timer):
+        """Updates the UI on the main thread after sync completion."""
+        # 'timer' object is passed automatically by rumps.Timer
+        logger.info("Finalizing sync UI on main thread.")
+        self.is_syncing = False
+        self.last_sync_status = f"Last sync: {time.strftime('%H:%M:%S')} - {'Success' if overall_success else 'Failed'}"
+        self.status_item.title = f"Status: {self.last_sync_status}"
+        self.last_sync_results = final_results # Store results if needed
 
-        # Store the detailed results received from the sync task
-        self.last_sync_results = sync_results
+        # Re-enable the "Sync Now" menu item if it was disabled
+        # if self.menu["Sync Now"].callback is None:
+        #    self.menu["Sync Now"].set_callback(self.sync_now)
 
-        try:
-            logging.debug(f"Timer callback: Updating status after sync (overall_success={overall_success})")
-            self.last_sync_status = f"Last sync: {time.strftime('%H:%M:%S')} - {'Success' if overall_success else 'Failed'}"
-            logging.debug(f"Timer callback: New status string: {self.last_sync_status}")
+        # Optional: Update status panel one last time if it's still open
+        # if self.status_panel and self.status_panel.isVisible():
+        #    # Maybe add a final summary message to the panel?
+        #    pass
 
-            logging.debug("Timer callback: Updating status_item title...")
-            self.status_item.title = f"Status: {self.last_sync_status}"
-            logging.debug("Timer callback: Status_item title updated.")
+        logger.info("Sync UI finalized.")
 
-            # Synced projects submenu removed
-
-            logging.debug("Timer callback: Setting self.syncing = False")
-            self.syncing = False
-            logging.debug("Timer callback: Status update complete.")
-
-            # Stop the progress timer now that sync is finished
-            if self.progress_timer:
-                logging.debug("Stopping progress timer.")
-                self.progress_timer.stop()
-                self.progress_timer = None
-
-            # Update status panel if visible
-            if self.status_panel_window and self.status_panel_window.isVisible():
-                try:
-                    combined_status = self._get_combined_status()
-                    self.status_panel_window.update_status(combined_status)
-                except Exception as panel_update_err:
-                    logging.error(f"Error updating status panel after sync: {panel_update_err}")
-
-        except Exception as e:
-            logging.exception(f"Exception during timer-based status update: {e}")
-            # Attempt to set syncing to False and stop timer even if status update fails
-            self.syncing = False
-            if self.progress_timer:
-                self.progress_timer.stop()
-                self.progress_timer = None
-            self.last_sync_results = None # Indicate error state
-            self.update_synced_projects_list() # Update list to show error
-
+    # --- Update scheduled_sync ---
     def scheduled_sync(self):
         """Run the scheduled sync if not already syncing"""
         logging.debug("Scheduled sync triggered")
-        if not self.syncing:
+        if not self.is_syncing: # Use the correct flag
             logging.info("Starting scheduled sync")
-            self.sync_thread = threading.Thread(target=self.perform_sync_task)
-            self.sync_thread.start()
+            # No need to create thread here, call the task handler
+            self.perform_sync_task()
         else:
             logging.debug("Skipping scheduled sync (sync already in progress)")
 
