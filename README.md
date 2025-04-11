@@ -2,14 +2,14 @@
 
 <p align="center"><img src="turbo_sync/icon.png" alt="the turbo link icon which is a gay pride flag with the letter T in the middle of it, the icon has rounded corners much like any other app icon" width="128"></p>
 
-A macOS menubar app that keeps local folders in sync with specific directories on a remote server. It looks for `.livework` files on the remote (via a mounted volume) and uses `rclone bisync` to synchronize those directories.
+A macOS menubar app that keeps local folders in sync with specific directories on a remote server. It looks for `.livework` files on the remote (via a mounted volume or SSH) and uses `rsync` to synchronize those directories.
 
 It also features optional real-time local file watching using `fswatch` to trigger immediate syncs when you save changes! 💾➡️☁️
 
 ## Key Features ✨
 
 *   Automatic discovery of remote directories marked with `.livework`.
-*   Bidirectional sync using `rclone bisync` (requires the remote path to be mounted locally).
+*   Efficient sync using `rsync` (supports both mounted volumes and SSH).
 *   Real-time sync on local changes (optional, requires `fswatch`).
 *   Simple menubar interface for status and manual control.
 *   Configuration via a `.env` file.
@@ -18,8 +18,8 @@ It also features optional real-time local file watching using `fswatch` to trigg
 
 *   macOS
 *   Python 3.7+
-*   `rclone` (Install: `brew install rclone`)
-*   Locally mounted path for your remote server's file system (which can be local files or SMB/NFS share mounted in `/Volumes/`).
+*   `rsync` (Usually pre-installed on macOS. If not: `brew install rsync`)
+*   Access to the remote server (either via SSH or a locally mounted path like SMB/NFS in `/Volumes/`).
 *   `fswatch` (Optional, for file watching: `brew install fswatch`)
 
 ## This repo should not be confused with sibiling project "TurboSort" 👀
@@ -47,7 +47,9 @@ This will install `TurboSync.app` directly into your `/Applications` folder.
 
 2.  **Install Tools:**
     ```bash
-    brew install rclone fswatch
+    # rsync is usually included with macOS, but ensure it's available
+    # brew install rsync  # Uncomment if needed
+    brew install fswatch
     ```
     *(Skip `fswatch` if you don't need real-time local sync)*
 
@@ -112,7 +114,7 @@ If you encounter permission issues when copying the app to the Applications fold
 3. **App doesn't appear in menubar:**
    - Make sure the app has permissions to run as a background application
    - Check the logs at `~/Library/Logs/TurboSync/turbosync.log`
-   - Ensure rclone and fswatch are installed and in your PATH
+   - Ensure rsync and fswatch are installed and in your PATH
 
 # License
 
