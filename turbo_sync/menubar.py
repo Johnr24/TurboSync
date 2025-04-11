@@ -413,7 +413,9 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         """Updates the UI on the main thread after sync completion."""
         # 'timer' object is passed automatically by rumps.Timer
         logger.info("Finalizing sync UI on main thread.")
+        logger.debug("Setting self.is_syncing = False") # Add logging
         self.is_syncing = False
+        logger.debug("self.is_syncing is now False") # Add logging
         self.last_sync_status = f"Last sync: {time.strftime('%H:%M:%S')} - {'Success' if overall_success else 'Failed'}"
         self.status_item.title = f"Status: {self.last_sync_status}"
         self.last_sync_results = final_results # Store results if needed
