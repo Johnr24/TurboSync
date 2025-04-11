@@ -29,8 +29,8 @@ class StatusPanel(QDialog):
 
         # --- UI Elements ---
         self.table_widget = QTableWidget()
-        self.table_widget.setColumnCount(4)
-        self.table_widget.setHorizontalHeaderLabels(["Project", "Status", "Progress", "Details"])
+        self.table_widget.setColumnCount(5)
+        self.table_widget.setHorizontalHeaderLabels(["Project", "Status", "Progress", "Details", "Last Updated"])
         self.table_widget.verticalHeader().setVisible(False) # Hide row numbers
         self.table_widget.setEditTriggers(QTableWidget.NoEditTriggers) # Read-only
         self.table_widget.setSelectionBehavior(QTableWidget.SelectRows)
@@ -70,7 +70,7 @@ class StatusPanel(QDialog):
         self._project_data = combined_status_data
 
         # Update table view
-        self.table_widget.setRowCount(len(self._project_data))
+        self.table_widget.setRowCount(len(self._project_data) + 1)  # Add an extra row for totals
         self.table_widget.setSortingEnabled(False) # Disable sorting during update
 
         row = 0
@@ -83,7 +83,7 @@ class StatusPanel(QDialog):
             progress = data.get('progress', None) # Can be None or int
             details = data.get('details', '')
 
-            # Create items
+            # Create items and add last updated time
             item_project = QTableWidgetItem(project_name)
             item_status = QTableWidgetItem(status)
             item_progress = QTableWidgetItem(f"{progress}%" if progress is not None else "---")
