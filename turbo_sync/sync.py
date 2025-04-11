@@ -258,7 +258,7 @@ def list_remote_directory(config):
             logger.error(f"Error listing remote directory: {e.stderr}")
             return False
 
-def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None):
+def sync_directory(remote_dir_info, local_base_dir, config, signal_emitter=None):
     """
     Sync a specific remote directory to a local directory using rsync.
 
@@ -266,10 +266,10 @@ def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None)
         remote_dir_info (tuple): A tuple containing (index, remote_path).
         local_base_dir (str): The base local directory to sync into.
         config (dict): The loaded configuration dictionary.
-        progress_queue (multiprocessing.Queue, optional): Queue to send progress updates.
+        signal_emitter (SyncSignalEmitter, optional): Emitter to send progress updates via signals.
 
     Returns:
-        tuple: (remote_path, success_flag) where success_flag is True or False.
+        tuple: (remote_path, result_data) where result_data contains success status and details.
     """
     index, remote_path = remote_dir_info
     project_name = os.path.basename(remote_path) # Get project name for reporting
