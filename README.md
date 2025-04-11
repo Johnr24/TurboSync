@@ -28,8 +28,6 @@ It also features optional real-time local file watching using `fswatch` to trigg
 Turbosort is designed to work in tadem with colourstream or any S3 Server as a one way file transfer operation. 
 TurboSort can be found here - https://github.com/johnr24/TurboSort
 
-### Just a word of caution, 
-Please note that This application uses the Rclone bisync feature, which is as of writing on the 31st of March 2025, currently in beta. Turbosync software comes without warranty. We Suggest you enable backups or snapshotting on your remote or local volume as a contingency measure.
 
 ## Quick Install & Setup 🛠️
 
