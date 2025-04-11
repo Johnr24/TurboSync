@@ -725,11 +725,11 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 logger.exception("Failed to create StatusPanel instance.")
                 rumps.notification("TurboSync Error", "Status Panel Error", f"Could not create panel: {e}")
                 return # Don't proceed if creation failed
-       else:
-           # Instance exists, just ensure it's visible
-           logger.info("Status Panel instance already exists. Showing it.")
+        else:
+            # Instance exists, just ensure it's visible
+            logger.info("Status Panel instance already exists. Showing it.")
 
-       # --- Removed clear_status() call from here ---
+        # --- Removed clear_status() call from here ---
 
        # Show and raise the window (whether new or existing)
        try:
