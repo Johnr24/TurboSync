@@ -27,11 +27,11 @@ DEFAULT_CONFIG = {
     # Syncthing Instance A (Source) Defaults
     'syncthing_api_address_source': '127.0.0.1:28384', # Changed port
     'syncthing_gui_address_source': '127.0.0.1:28385', # Changed port
-    'syncthing_api_key_source': '',
+    # 'syncthing_api_key_source': '', # Removed - Auto-retrieved
     # Syncthing Instance B (Destination) Defaults
     'syncthing_api_address_dest': '127.0.0.1:28386', # Changed port
     'syncthing_gui_address_dest': '127.0.0.1:28387', # Changed port
-    'syncthing_api_key_dest': '',
+    # 'syncthing_api_key_dest': '', # Removed - Auto-retrieved
 }
 
 def load_config(dotenv_path=None):
@@ -64,11 +64,11 @@ def load_config(dotenv_path=None):
     # Source Syncthing Instance
     config['syncthing_api_address_source'] = loaded_values.get('SYNCTHING_API_ADDRESS_SOURCE', DEFAULT_CONFIG['syncthing_api_address_source'])
     config['syncthing_gui_address_source'] = loaded_values.get('SYNCTHING_GUI_ADDRESS_SOURCE', DEFAULT_CONFIG['syncthing_gui_address_source'])
-    config['syncthing_api_key_source'] = loaded_values.get('SYNCTHING_API_KEY_SOURCE', DEFAULT_CONFIG['syncthing_api_key_source'])
+    # config['syncthing_api_key_source'] = loaded_values.get('SYNCTHING_API_KEY_SOURCE', DEFAULT_CONFIG['syncthing_api_key_source']) # Removed
     # Destination Syncthing Instance
     config['syncthing_api_address_dest'] = loaded_values.get('SYNCTHING_API_ADDRESS_DEST', DEFAULT_CONFIG['syncthing_api_address_dest'])
     config['syncthing_gui_address_dest'] = loaded_values.get('SYNCTHING_GUI_ADDRESS_DEST', DEFAULT_CONFIG['syncthing_gui_address_dest'])
-    config['syncthing_api_key_dest'] = loaded_values.get('SYNCTHING_API_KEY_DEST', DEFAULT_CONFIG['syncthing_api_key_dest'])
+    # config['syncthing_api_key_dest'] = loaded_values.get('SYNCTHING_API_KEY_DEST', DEFAULT_CONFIG['syncthing_api_key_dest']) # Removed
     config['watch_local_files'] = str(loaded_values.get('WATCH_LOCAL_FILES', str(DEFAULT_CONFIG['watch_local_files']))).lower() == 'true'
     config['watch_delay_seconds'] = int(loaded_values.get('WATCH_DELAY_SECONDS', DEFAULT_CONFIG['watch_delay_seconds']))
     config['start_at_login'] = str(loaded_values.get('START_AT_LOGIN', str(DEFAULT_CONFIG['start_at_login']))).lower() == 'true'

@@ -129,10 +129,26 @@ def check_dependencies():
 
     # Check for Syncthing (essential)
     from .syncthing_manager import get_syncthing_executable_path
-    if not get_syncthing_executable_path():
+    syncthing_path = get_syncthing_executable_path()
+    if not syncthing_path:
          logging.error("Syncthing executable not found. TurboSync cannot manage Syncthing.")
          # Show notification?
-         import rumps
+         try: # Use try-except for rumps import/use
+             import rumps
+             rumps.notification(
+                 "TurboSync Error",
+                 "Syncthing Not Found",
+                 "Could not find the bundled Syncthing executable. Please rebuild the application.",
+                 sound=True
+             )
+         except Exception as e:
+             logging.error(f"Failed to show Syncthing not found notification: {e}")
+         return False # Critical dependency missing
+    else:
+        logging.info(f"Syncthing executable found at: {syncthing_path}")
+
+    # Check if fswatch is available if file watching is enabled
+    fswatch_config = get_fswatch_config()
          rumps.notification(
              "TurboSync Error",
              "Syncthing Not Found",
@@ -141,23 +157,30 @@ def check_dependencies():
          )
          return False # Critical dependency missing
 
-    # Check if fswatch is available if file watching is enabled
-    fswatch_config = get_fswatch_config()
     if fswatch_config['watch_enabled']:
         if is_fswatch_available():
-            try:
-                result = subprocess.run(["fswatch", "--version"], capture_output=True, check=True)
-                fswatch_version = result.stdout.decode('utf-8').strip()
-                logging.info(f"fswatch found: {fswatch_version}")
-            except Exception as e:
-                logging.warning(f"Error getting fswatch version: {e}")
+            logging.info("fswatch is available.")
+            # Optional: Log version if needed, but availability check is main point
+            # try:
+            #     result = subprocess.run(["fswatch", "--version"], capture_output=True, check=True, text=True)
+            #     fswatch_version = result.stdout.strip()
+            #     logging.info(f"fswatch version: {fswatch_version}")
+            # except Exception as e:
+            #     logging.warning(f"Could not determine fswatch version: {e}")
         else:
             logging.warning("fswatch not found - file watching will be disabled")
-            import rumps
-            rumps.notification(
-                "TurboSync Warning",
-                "fswatch Not Found",
-                "File watching is enabled but fswatch is not installed. Install with: brew install fswatch",
+            try: # Use try-except for rumps import/use
+                import rumps
+                rumps.notification(
+                    "TurboSync Warning",
+                    "fswatch Not Found",
+                    "File watching is enabled but fswatch is not installed. Install with: brew install fswatch",
+                    sound=True
+                )
+            except Exception as e:
+                logging.error(f"Failed to show fswatch not found notification: {e}")
+    else:
+        logging.info("File watching is disabled in configuration, skipping fswatch check.")
                 sound=True
             )
     

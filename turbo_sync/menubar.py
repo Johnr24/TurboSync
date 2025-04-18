@@ -90,10 +90,14 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.last_config_update_status = "Never updated"
         self.file_watcher = None
         self.watch_enabled = False # Will be updated by setup_file_watcher
-        self.syncthing_process = None # Add state for Syncthing process
+        # State for TWO Syncthing instances
+        self.syncthing_process_source = None
+        self.syncthing_process_dest = None
+        self.api_client_source = None
+        self.api_client_dest = None
+        # --- End two instance state ---
         self.status_panel = None # Changed from self.status_panel_window
-        self.syncthing_api_client = None # Add state for API client
-        self.status_poll_timer = None # Timer for polling Syncthing status
+        self.status_poll_timer = None # Timer for polling Syncthing status (will poll both)
         self.scheduler_thread = None # Thread for scheduler
 
         # --- Define Items Needing State Management First ---
@@ -181,18 +185,19 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         # Set up file watcher if enabled
         self.setup_file_watcher() # This handles enabling/disabling based on config
 
-        # Start Syncthing Daemon
-        self._start_syncthing_daemon_and_client()
+        # Start Syncthing Daemons (plural)
+        self._start_syncthing_daemons_and_clients() # Updated for two instances
 
-        # Start status polling (will be handled by _start_syncthing_daemon_and_client if successful)
+        # Start status polling (will be handled by _initialize_api_clients if successful)
 
         # Register cleanup function
         atexit.register(self.cleanup_syncthing)
 
         # Trigger initial config update check? Optional, but might be good.
-        self.update_syncthing_config_task()
-        # Trigger initial status poll
-        self._poll_syncthing_status()
+        # Only run if config is valid, otherwise it will fail anyway
+        if self.config and self.config.get('is_valid'):
+            self.update_syncthing_config_task()
+        # Initial status poll is triggered by _initialize_api_clients if successful
 
 
     def _disable_features(self):
@@ -210,71 +215,134 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         schedule.clear()
         self._stop_file_watcher()
         self._stop_status_poll_timer()
-        self.cleanup_syncthing() # Stop Syncthing daemon if running
+        self.cleanup_syncthing() # Stop Syncthing daemons if running
 
-        # Clear API client
-        self.syncthing_api_client = None
+        # Clear API clients
+        self.api_client_source = None
+        self.api_client_dest = None
 
-    def _start_syncthing_daemon_and_client(self):
-        """Starts the Syncthing daemon and initializes the API client."""
+    def _start_syncthing_daemons_and_clients(self):
+        """Starts the TWO Syncthing daemons and initializes their API clients."""
         if not self.config or not self.config.get('is_valid'):
-            logging.warning("Cannot start Syncthing daemon: Configuration is invalid.")
+            logging.warning("Cannot start Syncthing daemons: Configuration is invalid.")
             return
 
-        if self.syncthing_process and self.syncthing_process.poll() is None:
-             logging.info("Syncthing daemon already running.")
-             # Ensure API client is initialized if needed
-             if not self.syncthing_api_client:
-                 self._initialize_api_client()
-             return # Already running
-
-        logging.info("Attempting to start Syncthing daemon...")
-        api_addr = self.config.get('syncthing_listen_address', DEFAULT_SYNCTHING_API_ADDRESS)
-
-        self.syncthing_process, error_msg = start_syncthing_daemon(api_address=api_addr)
-
-        if not self.syncthing_process:
-            logging.error(f"Failed to start Syncthing daemon: {error_msg}")
-            rumps.notification("TurboSync Error", "Syncthing Failed", f"Could not start Syncthing: {error_msg}")
-            self.status_item.title = "Status: Syncthing Failed"
+        # --- Start Source Instance ---
+        if self.syncthing_process_source and self.syncthing_process_source.poll() is None:
+            logging.info("Syncthing source daemon already running.")
         else:
-            logging.info(f"Syncthing daemon started (PID: {self.syncthing_process.pid}).")
-            # Initialize API Client after successful start
-            self._initialize_api_client()
+            logging.info("Attempting to start Syncthing source daemon...")
+            api_addr_source = self.config.get('syncthing_api_address_source')
+            gui_addr_source = self.config.get('syncthing_gui_address_source')
+            if not api_addr_source or not gui_addr_source:
+                 logging.error("Source Syncthing API or GUI address missing in config.")
+                 # Handle error appropriately - maybe disable features?
+            else:
+                self.syncthing_process_source, error_msg = start_syncthing_daemon(
+                    instance_id="source",
+                    config_dir=SYNCTHING_CONFIG_DIR_SOURCE,
+                    api_address=api_addr_source,
+                    gui_address=gui_addr_source,
+                    log_file=SYNCTHING_LOG_FILE_SOURCE
+                )
+                if not self.syncthing_process_source:
+                    logging.error(f"Failed to start Syncthing source daemon: {error_msg}")
+                    rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Could not start: {error_msg}")
+                    # Consider stopping dest if source fails?
+                else:
+                    logging.info(f"Syncthing source daemon started (PID: {self.syncthing_process_source.pid}).")
 
-    def _initialize_api_client(self):
-        """Initializes the Syncthing API client using current config."""
+        # --- Start Destination Instance ---
+        if self.syncthing_process_dest and self.syncthing_process_dest.poll() is None:
+            logging.info("Syncthing destination daemon already running.")
+        else:
+            logging.info("Attempting to start Syncthing destination daemon...")
+            api_addr_dest = self.config.get('syncthing_api_address_dest')
+            gui_addr_dest = self.config.get('syncthing_gui_address_dest')
+            if not api_addr_dest or not gui_addr_dest:
+                 logging.error("Destination Syncthing API or GUI address missing in config.")
+                 # Handle error appropriately
+            else:
+                self.syncthing_process_dest, error_msg = start_syncthing_daemon(
+                    instance_id="dest",
+                    config_dir=SYNCTHING_CONFIG_DIR_DEST,
+                    api_address=api_addr_dest,
+                    gui_address=gui_addr_dest,
+                    log_file=SYNCTHING_LOG_FILE_DEST
+                )
+                if not self.syncthing_process_dest:
+                    logging.error(f"Failed to start Syncthing destination daemon: {error_msg}")
+                    rumps.notification("TurboSync Error", "Syncthing Dest Failed", f"Could not start: {error_msg}")
+                    # Consider stopping source if dest fails?
+                else:
+                    logging.info(f"Syncthing destination daemon started (PID: {self.syncthing_process_dest.pid}).")
+
+        # --- Initialize API Clients (if daemons started) ---
+        self._initialize_api_clients()
+
+    def _initialize_api_clients(self):
+        """Initializes the Syncthing API clients for both instances."""
         if not self.config or not self.config.get('is_valid'):
-            logging.warning("Cannot initialize API client: Configuration invalid.")
-            self.syncthing_api_client = None
+            logging.warning("Cannot initialize API clients: Configuration invalid.")
+            self.api_client_source = None
+            self.api_client_dest = None
             self._stop_status_poll_timer()
             return
 
-        api_addr = self.config.get('syncthing_listen_address', DEFAULT_SYNCTHING_API_ADDRESS)
-        api_key = self.config.get('syncthing_api_key')
+        # --- Initialize Source Client ---
+        api_addr_source = self.config.get('syncthing_api_address_source')
+        api_key_source = None
+        if self.syncthing_process_source and self.syncthing_process_source.poll() is None:
+            logger.info("Attempting to retrieve API key from Source Syncthing config.xml...")
+            # Give Syncthing a bit more time to generate the config if needed
+            time.sleep(1)
+            api_key_source = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_SOURCE)
 
-        if not api_key:
-            logger.info("Attempting to retrieve API key from Syncthing config.xml...")
-            api_key = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR)
-
-        if api_key:
+        if api_key_source and api_addr_source:
             try:
-                # Stop existing poll timer before creating new client
-                self._stop_status_poll_timer()
-                self.syncthing_api_client = SyncthingApiClient(api_key=api_key, address=api_addr)
-                logging.info("Syncthing API client initialized successfully.")
-                # Start polling timer only if API client is ready
-                self._start_status_poll_timer()
+                self.api_client_source = SyncthingApiClient(api_key=api_key_source, address=api_addr_source)
+                logging.info("Source Syncthing API client initialized successfully.")
             except Exception as api_e:
-                logging.error(f"Failed to initialize Syncthing API client: {api_e}")
-                rumps.notification("TurboSync Error", "Syncthing API Error", f"Could not connect: {api_e}")
-                self.syncthing_api_client = None
-                self._stop_status_poll_timer() # Ensure timer is stopped on error
+                logging.error(f"Failed to initialize Source Syncthing API client: {api_e}")
+                rumps.notification("TurboSync Error", "Source API Error", f"Could not connect: {api_e}")
+                self.api_client_source = None
         else:
-            logging.error("Syncthing API key not found in config or config.xml. Status polling disabled.")
-            rumps.notification("TurboSync Warning", "Syncthing API Key Missing", "Cannot poll status.")
-            self.syncthing_api_client = None
-            self._stop_status_poll_timer() # Ensure timer is stopped
+            if not api_key_source:
+                logging.error("Source Syncthing API key not found in config.xml or daemon not running.")
+                rumps.notification("TurboSync Warning", "Source API Key Missing", "Cannot connect to source Syncthing.")
+            if not api_addr_source:
+                 logging.error("Source Syncthing API address missing in config.")
+            self.api_client_source = None
+
+        # --- Initialize Destination Client ---
+        api_addr_dest = self.config.get('syncthing_api_address_dest')
+        api_key_dest = None
+        if self.syncthing_process_dest and self.syncthing_process_dest.poll() is None:
+            logger.info("Attempting to retrieve API key from Destination Syncthing config.xml...")
+            time.sleep(1) # Give it time too
+            api_key_dest = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_DEST)
+
+        if api_key_dest and api_addr_dest:
+            try:
+                self.api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=api_addr_dest)
+                logging.info("Destination Syncthing API client initialized successfully.")
+            except Exception as api_e:
+                logging.error(f"Failed to initialize Destination Syncthing API client: {api_e}")
+                rumps.notification("TurboSync Error", "Dest API Error", f"Could not connect: {api_e}")
+                self.api_client_dest = None
+        else:
+            if not api_key_dest:
+                logging.error("Destination Syncthing API key not found in config.xml or daemon not running.")
+                rumps.notification("TurboSync Warning", "Dest API Key Missing", "Cannot connect to destination Syncthing.")
+            if not api_addr_dest:
+                 logging.error("Destination Syncthing API address missing in config.")
+            self.api_client_dest = None
+
+        # --- Start Polling Timer (only if BOTH clients initialized) ---
+        if self.api_client_source and self.api_client_dest:
+            self._start_status_poll_timer()
+        else:
+            self._stop_status_poll_timer() # Ensure timer is stopped if one or both failed
 
     def create_fallback_icon(self):
         """Creates a simple fallback icon if the main one is missing."""
@@ -450,11 +518,25 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         # Define the target function for the background thread
         def config_update_thread_target():
             logger.info("Config update thread started.")
+            # Ensure API clients are available before proceeding
+            if not self.api_client_source or not self.api_client_dest:
+                 logger.error("Cannot run config update: API clients not initialized.")
+                 rumps.notification("TurboSync Error", "API Clients Missing", "Cannot update config.", sound=True)
+                 # Need to finalize UI even on early exit
+                 update_callback = functools.partial(
+                     self._finalize_config_update_ui,
+                     False, # success = False
+                     "API clients not ready.",
+                     original_status_title
+                 )
+                 rumps.Timer(update_callback, 0.1).start()
+                 return # Exit thread target
+
             success = False
             message = "Config update failed."
             try:
-                # Call the function from sync.py
-                success, message = update_syncthing_configuration()
+                # Call the function from sync.py, passing the clients
+                success, message = update_syncthing_configuration(self.api_client_source, self.api_client_dest)
 
                 logger.info(f"Config update task completed in thread. Success: {success}, Message: {message}")
                 # Show notification (safe from thread)
@@ -497,17 +579,26 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
         # Restore status title or trigger immediate poll?
         # Triggering a poll is better as the config change might affect status
-        # Only poll if config is valid and API client exists
-        if self.config.get('is_valid') and self.syncthing_api_client:
-             self.status_item.title = original_status_title # Restore briefly while polling
+        # Only poll if config is valid and BOTH API clients exist
+        if self.config.get('is_valid') and self.api_client_source and self.api_client_dest:
+             # Don't necessarily restore original title, let poll update it
+             # self.status_item.title = original_status_title # Restore briefly while polling
              self._poll_syncthing_status() # Trigger immediate poll to reflect changes
         elif not self.config.get('is_valid'):
              self.status_item.title = "Status: Configuration Required" # Reset to config required status
         else:
-             self.status_item.title = "Status: Syncthing Stopped/Error" # Fallback status
+             # Determine more specific status if possible
+             source_running = self.syncthing_process_source and self.syncthing_process_source.poll() is None
+             dest_running = self.syncthing_process_dest and self.syncthing_process_dest.poll() is None
+             if not source_running and not dest_running:
+                 self.status_item.title = "Status: Syncthing Stopped"
+             elif not self.api_client_source or not self.api_client_dest:
+                 self.status_item.title = "Status: Syncthing API Error" # If running but client failed
+             else:
+                 self.status_item.title = "Status: Syncthing Error" # Generic fallback
 
         # Re-enable the "Update Syncthing Config" menu item if it was disabled AND config is valid
-        update_item = self.menu.get("Update Syncthing Config") # Get by key/title
+        # update_item = self.menu.get("Update Syncthing Config") # Get by key/title
         # if update_item and update_item.callback is None:
         #    update_item.set_callback(self.update_syncthing_config_task)
 
@@ -518,8 +609,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
     # --- Syncthing Status Polling ---
     def _start_status_poll_timer(self, interval=5): # Poll every 5 seconds
         """Starts the timer to periodically poll Syncthing status."""
-        # Only start if config is valid and API client exists
-        if self.config.get('is_valid') and self.syncthing_api_client:
+        # Only start if config is valid and BOTH API clients exist
+        if self.config.get('is_valid') and self.api_client_source and self.api_client_dest:
             if self.status_poll_timer is None:
                 logger.info(f"Starting Syncthing status poll timer (interval: {interval}s).")
                 self.status_poll_timer = rumps.Timer(self._poll_syncthing_status, interval)
@@ -527,7 +618,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             else:
                 logger.debug("Status poll timer already running.")
         else:
-             logger.warning("Cannot start status poll timer: Config invalid or API client not initialized.")
+             logger.warning("Cannot start status poll timer: Config invalid or one/both API clients not initialized.")
              self._stop_status_poll_timer() # Ensure it's stopped if conditions aren't met
 
     def _stop_status_poll_timer(self):
@@ -539,47 +630,66 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
     def _poll_syncthing_status(self, timer=None):
         """Polls Syncthing API for status and updates UI."""
-        if not self.syncthing_api_client:
-            logger.debug("Skipping status poll: API client not available.")
+        if not self.api_client_source or not self.api_client_dest:
+            logger.debug("Skipping status poll: One or both API clients not available.")
+            # Update status to reflect API issue if needed
+            source_running = self.syncthing_process_source and self.syncthing_process_source.poll() is None
+            dest_running = self.syncthing_process_dest and self.syncthing_process_dest.poll() is None
+            if not self.api_client_source and source_running:
+                 self.status_item.title = "Status: Source API Error"
+            elif not self.api_client_dest and dest_running:
+                 self.status_item.title = "Status: Dest API Error"
+            elif not source_running and not dest_running:
+                 self.status_item.title = "Status: Syncthing Stopped"
+            # else: # Both running but one client failed init earlier
+            #    self.status_item.title = "Status: Syncthing API Error" # Already set potentially
             return
 
         logger.debug("Polling Syncthing status...")
         try:
-            all_statuses = self.syncthing_api_client.get_all_folder_statuses()
-            # TODO: Get connection status if needed: self.syncthing_api_client.get_connections()
+            # Poll both instances
+            statuses_source = self.api_client_source.get_all_folder_statuses()
+            statuses_dest = self.api_client_dest.get_all_folder_statuses()
+
+            # Combine statuses (simple approach: prioritize error/syncing states)
+            # A more sophisticated approach might be needed depending on UI requirements
+            # Merge, preferring source status if IDs conflict (though they shouldn't)
+            combined_statuses = {**statuses_dest, **statuses_source}
+            num_folders = len(combined_statuses) # Count unique folder IDs
 
             # Update the main status bar item (simple state for now)
-            # More complex logic could check if any folder is syncing/error
-            if all_statuses:
-                 # Check for errors or non-idle states
-                 # Use the imported helper function for parsing
-                 has_errors = any(SyncthingApiClient.parse_folder_status(s).get('error') for s in all_statuses.values() if s)
-                 is_syncing = any(SyncthingApiClient.parse_folder_status(s).get('state') not in ['idle', 'error', 'unknown', 'scanning'] for s in all_statuses.values() if s) # Consider 'scanning' as not 'syncing' for status bar
-                 is_scanning = any(SyncthingApiClient.parse_folder_status(s).get('state') == 'scanning' for s in all_statuses.values() if s)
+            if combined_statuses:
+                 # Check for errors or non-idle states across combined statuses
+                 has_errors = any(SyncthingApiClient.parse_folder_status(s).get('error') for s in combined_statuses.values() if s)
+                 is_syncing = any(SyncthingApiClient.parse_folder_status(s).get('state') not in ['idle', 'error', 'unknown', 'scanning'] for s in combined_statuses.values() if s)
+                 is_scanning = any(SyncthingApiClient.parse_folder_status(s).get('state') == 'scanning' for s in combined_statuses.values() if s)
 
                  if has_errors:
-                     self.status_item.title = f"Status: Syncthing Error ({len(all_statuses)} folders)"
+                     self.status_item.title = f"Status: Syncthing Error ({num_folders} folders)"
                  elif is_syncing:
-                     self.status_item.title = f"Status: Syncthing Syncing ({len(all_statuses)} folders)"
+                     self.status_item.title = f"Status: Syncthing Syncing ({num_folders} folders)"
                  elif is_scanning:
-                     self.status_item.title = f"Status: Syncthing Scanning ({len(all_statuses)} folders)"
+                     self.status_item.title = f"Status: Syncthing Scanning ({num_folders} folders)"
                  else:
-                     self.status_item.title = f"Status: Syncthing Idle ({len(all_statuses)} folders)"
+                     self.status_item.title = f"Status: Syncthing Idle ({num_folders} folders)"
             else:
                  # Handle case where status couldn't be fetched or no folders exist
-                 if self.syncthing_process and self.syncthing_process.poll() is None:
-                     # Check if API client is valid before assuming no folders
-                     if self.syncthing_api_client:
-                         self.status_item.title = "Status: Syncthing Running (No folders?)"
+                 # Check if processes are running
+                 source_running = self.syncthing_process_source and self.syncthing_process_source.poll() is None
+                 dest_running = self.syncthing_process_dest and self.syncthing_process_dest.poll() is None
+                 if source_running and dest_running:
+                     # Check if API clients are valid before assuming no folders
+                     if self.api_client_source and self.api_client_dest:
+                         self.status_item.title = "Status: Syncthing Running (No folders)"
                      else:
-                         self.status_item.title = "Status: Syncthing Running (API Error)"
+                         self.status_item.title = "Status: Syncthing Running (API Error)" # One or both clients failed init
                  else:
                      self.status_item.title = "Status: Syncthing Stopped"
 
 
             # Update the status panel if it's open
             if self.status_panel and self.status_panel.isVisible():
-                self.status_panel.update_syncthing_display(all_statuses)
+                self.status_panel.update_syncthing_display(combined_statuses) # Pass combined status
 
         except Exception as e:
             logger.error(f"Error during Syncthing status poll: {e}")
@@ -803,79 +913,11 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         pass # Keep the method signature for now if needed later
 
     def _reinitialize_api_client(self, new_settings):
-        """Re-initializes the API client after settings changes.
-           Called internally by _load_and_initialize."""
-        # This logic is now handled by _initialize_api_client called from _load_and_initialize
-        logging.debug("API client re-initialization is handled by _initialize_api_client.")
-        pass # Keep the method signature for now if needed later
-
-# --- Removed old @rumps.clicked("Settings") and show_settings_dialog method ---
-
-
-# --- Update TurboSyncMenuBar ---
-        new_api_addr = new_settings.get('SYNCTHING_LISTEN_ADDRESS', DEFAULT_SYNCTHING_API_ADDRESS)
-        # Get the old API address from the current config
-        old_api_addr = self.config.get('syncthing_listen_address', DEFAULT_SYNCTHING_API_ADDRESS) if self.config else DEFAULT_SYNCTHING_API_ADDRESS
-        # Add checks for other critical daemon settings if they become configurable (e.g., protocol port)
-
-        # Restart if API address changed OR if the process isn't running but should be
-        needs_restart = False
-        if old_api_addr != new_api_addr:
-            logger.warning(f"Syncthing API address changed ('{old_api_addr}' -> '{new_api_addr}'). Restarting daemon...")
-            needs_restart = True
-        elif not self.syncthing_process or self.syncthing_process.poll() is not None:
-             # Check if Syncthing *should* be running (e.g., based on a config flag if added)
-             # For now, assume if process object exists but isn't running, it should be restarted.
-             if self.syncthing_process is not None:
-                 logger.warning("Syncthing daemon process found but not running. Attempting to restart...")
-                 needs_restart = True
-             # If self.syncthing_process is None, it means it wasn't started initially or was stopped intentionally.
-             # Don't automatically restart in that case unless a setting explicitly requires it.
-
-        if needs_restart:
-            # Stop existing daemon
-            if self.syncthing_process:
-                stop_syncthing_daemon(self.syncthing_process)
-                self.syncthing_process = None
-                self.syncthing_api_client = None # Invalidate API client
-                self._stop_status_poll_timer() # Stop polling
-
-            # Start new one with updated config (already loaded into self.config)
-            self.syncthing_process, error_msg = start_syncthing_daemon(
-                api_address=new_api_addr # Pass the new address
-            )
-            if not self.syncthing_process:
-                logger.error(f"Failed to restart Syncthing daemon after config change: {error_msg}")
-                rumps.notification("TurboSync Error", "Syncthing Restart Failed", error_msg)
-
-    def _reinitialize_api_client(self, new_settings):
         """Re-initializes the API client after settings changes."""
-        api_key = new_settings.get('SYNCTHING_API_KEY')
-        api_addr = new_settings.get('SYNCTHING_LISTEN_ADDRESS', DEFAULT_SYNCTHING_API_ADDRESS)
-        if not api_key:
-            api_key = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR)
+        # This is now handled by _initialize_api_clients called from _load_and_initialize
+        logging.debug("API client re-initialization handled by _initialize_api_clients.")
+        pass
 
-        if api_key and self.syncthing_process and self.syncthing_process.poll() is None:
-            try:
-                # Stop polling before creating new client, start after success
-                self._stop_status_poll_timer()
-                self.syncthing_api_client = SyncthingApiClient(api_key=api_key, address=api_addr)
-                logger.info("Syncthing API client re-initialized successfully.")
-                # Start polling again only if client is valid
-                self._start_status_poll_timer()
-            except Exception as e: # Catch broader exceptions
-                logger.error(f"Failed to re-initialize Syncthing API client: {e}")
-                self.syncthing_api_client = None # Ensure it's None on failure
-                self._stop_status_poll_timer() # Ensure polling is stopped on failure
-        else:
-            logger.warning("Cannot re-initialize API client: API key missing or daemon not running.")
-            self.syncthing_api_client = None
-            self._stop_status_poll_timer() # Ensure polling is stopped
-
-# --- Removed old @rumps.clicked("Settings") and show_settings_dialog method ---
-
-
-# --- Update TurboSyncMenuBar ---
 
     @rumps.clicked("Settings") # Restore decorator
     def launch_pyside_settings(self, sender): # Keep sender argument for manual callbacks
@@ -906,12 +948,15 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         rumps.quit_application()
 
     def cleanup_syncthing(self):
-        """Stops the Syncthing daemon if it's running."""
+        """Stops the Syncthing daemons if they are running."""
         self._stop_status_poll_timer() # Ensure timer is stopped
-        logging.info("Running Syncthing cleanup...")
-        if self.syncthing_process:
-            stop_syncthing_daemon(self.syncthing_process)
-            self.syncthing_process = None # Clear the reference
+        logging.info("Running Syncthing cleanup for both instances...")
+        if self.syncthing_process_source:
+            stop_syncthing_daemon(self.syncthing_process_source)
+            self.syncthing_process_source = None # Clear the reference
+        if self.syncthing_process_dest:
+            stop_syncthing_daemon(self.syncthing_process_dest)
+            self.syncthing_process_dest = None # Clear the reference
 
     # --- Status Panel Methods ---
 

@@ -10,9 +10,14 @@ logger = logging.getLogger(__name__)
 # Define user-specific config path (consistent with main.py/menubar.py)
 APP_NAME = "TurboSync"
 USER_CONFIG_DIR = os.path.expanduser(f'~/Library/Application Support/{APP_NAME}')
-SYNCTHING_CONFIG_DIR = os.path.join(USER_CONFIG_DIR, 'syncthing_config')
-SYNCTHING_LOG_FILE = os.path.join(os.path.expanduser('~/Library/Logs/TurboSync'), 'syncthing.log')
-DEFAULT_SYNCTHING_API_ADDRESS = "127.0.0.1:8385" # Default API address
+USER_LOG_DIR = os.path.expanduser('~/Library/Logs/TurboSync')
+
+# Instance-specific paths
+SYNCTHING_CONFIG_DIR_SOURCE = os.path.join(USER_CONFIG_DIR, 'syncthing_config_source')
+SYNCTHING_CONFIG_DIR_DEST = os.path.join(USER_CONFIG_DIR, 'syncthing_config_dest')
+SYNCTHING_LOG_FILE_SOURCE = os.path.join(USER_LOG_DIR, 'syncthing_source.log')
+SYNCTHING_LOG_FILE_DEST = os.path.join(USER_LOG_DIR, 'syncthing_dest.log')
+
 
 def get_syncthing_executable_path():
     """Finds the bundled Syncthing binary path."""
@@ -51,28 +56,36 @@ def get_syncthing_executable_path():
         logger.error("Syncthing executable not found.")
         return None
 
-def ensure_syncthing_config_dir():
-    """Ensures the Syncthing configuration directory exists."""
-    if not os.path.exists(SYNCTHING_CONFIG_DIR):
-        logger.info(f"Creating Syncthing config directory: {SYNCTHING_CONFIG_DIR}")
+def ensure_dir_exists(dir_path):
+    """Ensures the specified directory exists."""
+    if not os.path.exists(dir_path):
+        logger.info(f"Creating directory: {dir_path}")
         try:
-            os.makedirs(SYNCTHING_CONFIG_DIR, exist_ok=True)
+            os.makedirs(dir_path, exist_ok=True)
         except OSError as e:
-            logger.error(f"Failed to create Syncthing config directory: {e}")
+            logger.error(f"Failed to create directory {dir_path}: {e}")
             return False
     return True
 
-def start_syncthing_daemon(api_address=DEFAULT_SYNCTHING_API_ADDRESS):
-    """Starts the Syncthing daemon process."""
+def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, log_file):
+    """
+    Starts a specific Syncthing daemon instance.
+
+    Args:
+        instance_id (str): Identifier like "source" or "dest".
+        config_dir (str): Path to the configuration directory for this instance.
+        api_address (str): API listen address (e.g., "127.0.0.1:28384").
+        gui_address (str): GUI listen address (e.g., "127.0.0.1:28385").
+        log_file (str): Path to the log file for this instance.
+    """
     syncthing_exe = get_syncthing_executable_path()
     if not syncthing_exe:
         return None, "Syncthing executable not found."
 
-    if not ensure_syncthing_config_dir():
-        return None, "Failed to create Syncthing config directory."
+    if not ensure_dir_exists(config_dir):
+        return None, f"Failed to create Syncthing config directory for {instance_id}: {config_dir}"
 
-    # Ensure log directory exists
-    os.makedirs(os.path.dirname(SYNCTHING_LOG_FILE), exist_ok=True)
+    ensure_dir_exists(os.path.dirname(log_file)) # Ensure log directory exists
 
     # Command to start Syncthing
     # --home: Use our dedicated config directory
@@ -82,14 +95,22 @@ def start_syncthing_daemon(api_address=DEFAULT_SYNCTHING_API_ADDRESS):
     # --log-max-old-files=3: Keep only a few old log files
     cmd = [
         syncthing_exe,
-        f"--home={SYNCTHING_CONFIG_DIR}",
+        f"--home={config_dir}",
         "--no-browser",
-        f"--gui-address={api_address}",
-        f"--logfile={SYNCTHING_LOG_FILE}",
+        f"--gui-address={gui_address}", # Use separate GUI address
+        # Note: Syncthing >= 1.19 might use --api instead of relying on gui-address for API
+        # f"--api={api_address}", # Add if targeting Syncthing >= 1.19
+        f"--logfile={log_file}",
         "--log-max-old-files=3"
     ]
+    # If using Syncthing < 1.19, the API might listen on the gui-address.
+    # If using Syncthing >= 1.19, explicitly setting --api is preferred.
+    # For broader compatibility, we might rely on gui-address for API initially,
+    # or add logic to check Syncthing version if needed.
+    # Let's assume for now gui-address works for API for broader compatibility.
+    # If issues arise, add the --api flag.
 
-    logger.info(f"Starting Syncthing daemon with command: {' '.join(cmd)}")
+    logger.info(f"Starting Syncthing daemon ({instance_id}) with command: {' '.join(cmd)}")
     try:
         # Start the process without waiting for it.
         # Redirect stdout/stderr to DEVNULL if not needed, or capture if debugging is required.
