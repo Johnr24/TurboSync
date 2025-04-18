@@ -279,11 +279,6 @@ app = BUNDLE(
         shutil.copy2(fswatch_path, dest_fswatch) # copy2 preserves metadata like permissions
         print(f"  - Copied {os.path.basename(fswatch_path)} to {macos_dir}")
 
-        # Removed rsync copy
-        # dest_rsync = os.path.join(macos_dir, os.path.basename(rsync_path))
-        # shutil.copy2(rsync_path, dest_rsync)
-        # print(f"  - Copied {os.path.basename(rsync_path)} to {macos_dir}")
-
         dest_syncthing = os.path.join(macos_dir, os.path.basename(syncthing_path))
         shutil.copy2(syncthing_path, dest_syncthing)
         print(f"  - Copied {os.path.basename(syncthing_path)} to {macos_dir}")
