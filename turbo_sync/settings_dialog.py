@@ -139,13 +139,13 @@ QPushButton:pressed {
                 "SYNC_INTERVAL": ("Config Check Interval (minutes):", QSpinBox, 5), # How often to check for new .livework folders
             }),
             ("Syncthing Instance (Source)", { # Group Box for Source Syncthing Daemon
-                "SYNCTHING_API_ADDRESS_SOURCE": ("API Address:", QLineEdit, "127.0.0.1:8384"),
-                "SYNCTHING_GUI_ADDRESS_SOURCE": ("GUI Address:", QLineEdit, "127.0.0.1:8385"),
+                "SYNCTHING_API_ADDRESS_SOURCE": ("API Address:", QLineEdit, "127.0.0.1:28384"), # Changed port
+                "SYNCTHING_GUI_ADDRESS_SOURCE": ("GUI Address:", QLineEdit, "127.0.0.1:28385"), # Changed port
                 "SYNCTHING_API_KEY_SOURCE": ("API Key:", QLineEdit, ""),
             }),
             ("Syncthing Instance (Destination)", { # Group Box for Destination Syncthing Daemon
-                "SYNCTHING_API_ADDRESS_DEST": ("API Address:", QLineEdit, "127.0.0.1:8386"),
-                "SYNCTHING_GUI_ADDRESS_DEST": ("GUI Address:", QLineEdit, "127.0.0.1:8387"),
+                "SYNCTHING_API_ADDRESS_DEST": ("API Address:", QLineEdit, "127.0.0.1:28386"), # Changed port
+                "SYNCTHING_GUI_ADDRESS_DEST": ("GUI Address:", QLineEdit, "127.0.0.1:28387"), # Changed port
                 "SYNCTHING_API_KEY_DEST": ("API Key:", QLineEdit, ""),
             }),
             # File watching now monitors the SOURCE_DIR for .livework changes
