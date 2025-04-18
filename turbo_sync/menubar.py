@@ -675,11 +675,15 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                          self.file_watcher.stop()
                      self.setup_file_watcher() # Re-setup with new config
  
-            # --- Handle Start at Login ---
-            start_at_login = str(new_settings.get('START_AT_LOGIN', 'false')).lower() == 'true'
-            self._set_login_item(start_at_login)
+            # --- Handle Syncthing Restart if Needed ---
+            # Check if API address or key changed, potentially restart daemon
+            self._check_restart_syncthing_daemon(new_settings)
+            # Re-initialize API client after potential restart or key change
+            self._reinitialize_api_client(new_settings)
+            # Ensure polling timer is running if API client is now valid
+            self._start_status_poll_timer()
             # --- End Handle Start at Login ---
- 
+
             return True
         except Exception as e:
             logging.exception(f"Error saving settings to {USER_ENV_PATH}: {e}")
@@ -713,6 +717,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
     # --- Custom Quit Handler ---
     def quit_app(self, sender=None):
         """Stops Syncthing daemon and then quits the application."""
+        self._stop_status_poll_timer() # Stop polling first
         logging.info("Quit TurboSync requested.")
         self.cleanup_syncthing() # Call cleanup explicitly
         logging.info("Quitting rumps application.")
@@ -720,6 +725,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
     def cleanup_syncthing(self):
         """Stops the Syncthing daemon if it's running."""
+        self._stop_status_poll_timer() # Ensure timer is stopped
         logging.info("Running Syncthing cleanup...")
         if self.syncthing_process:
             stop_syncthing_daemon(self.syncthing_process)
@@ -735,6 +741,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
     def show_status_panel(self, sender=None): # Allow calling without sender
         """Creates (if needed), connects, clears, and shows the StatusPanel."""
         # Ensure QApplication instance exists for PySide dialogs
+        # Moved QApplication import here to avoid potential top-level conflicts
+        from PySide6.QtWidgets import QApplication
         app = QApplication.instance()
         if not app:
             logging.info("Creating QApplication instance for Status Panel.")
@@ -749,8 +757,9 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             logger.info("Creating Status Panel instance.")
             try:
                 self.status_panel = StatusPanel()
-                # Connect the signal from the emitter to the panel's slot
-                self.sync_emitter.sync_progress_update.connect(self.status_panel.update_status)
+                # --- Signal Connection Removed ---
+                # self.sync_emitter.sync_progress_update.connect(self.status_panel.update_status)
+
                 # Connect the panel's closed signal to reset our reference
                 self.status_panel.closed.connect(self._status_panel_closed)
                 logger.info("Status Panel created and signals connected.")
@@ -772,6 +781,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         except Exception as e:
             logger.error(f"Error showing/activating status panel: {e}")
             rumps.notification("TurboSync Error", "Status Panel Error", f"Could not show panel: {e}")
+        # Trigger an immediate poll/update when panel is shown
+        self._poll_syncthing_status()
 
     # Add or ensure this method exists to handle the panel closing
     def _status_panel_closed(self):
