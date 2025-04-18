@@ -173,8 +173,6 @@ def check_dependencies():
                 logging.error(f"Failed to show fswatch not found notification: {e}")
     else:
         logging.info("File watching is disabled in configuration, skipping fswatch check.")
-                sound=True
-            )
     
     return True
 
