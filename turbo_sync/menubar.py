@@ -178,9 +178,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 f"Please check your .env file: {str(e)}",
                 sound=True
             )
-            self.synced_projects_item.clear() # Clear existing items (like "Loading...")
-            self.synced_projects_item.add(rumps.MenuItem("Config Error"))
-            self.status_item.title = f"Status: Configuration Error"
+            # Synced projects submenu removed
+            self.status_item.title = "Status: Configuration Error" # Keep this line
 
     def create_fallback_icon(self):
         """Creates a simple fallback icon if the main one is missing."""
