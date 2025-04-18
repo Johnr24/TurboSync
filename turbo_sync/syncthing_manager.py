@@ -375,6 +375,11 @@ class SyncthingApiClient:
             logger.error(f"Syncthing API ping failed for {self.base_url}. Response: {response}")
             return False
 
+    def get_system_status(self):
+        """Gets the system status, which typically includes the local device ID ('myID')."""
+        logger.debug(f"Getting system status from {self.base_url}/system/status")
+        return self._request('GET', '/system/status')
+
     # --- Helper methods for modifying config structure (use before calling update_config) ---
 
     @staticmethod
