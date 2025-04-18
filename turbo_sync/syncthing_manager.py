@@ -168,9 +168,7 @@ def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, lo
         f"--home={config_dir}",
         "--no-browser",
         # Add API address if provided
-        # Note: Syncthing >= 1.19 uses --api, older might rely on gui-address.
-        # Assuming modern Syncthing for now.
-        *( [f"--api={api_address}"] if api_address else [] ), # Add --api flag if api_address is truthy
+        # Removed --api flag as it's not supported by the user's Syncthing version.
         f"--gui-address={gui_address}", # Use separate GUI address
         f"--logfile={log_file}",
         "--log-max-old-files=3"
