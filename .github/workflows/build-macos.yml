@@ -26,17 +26,31 @@ jobs:
         with:
           python-version: '3.x' # Use a recent Python 3 version
 
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pip # Default pip cache location on macOS
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # Ensure py2app is installed if not in requirements.txt
-          pip install py2app
+          # Pillow should now be in requirements.txt
 
-      - name: Install build tools (fswatch, rsync, create-dmg)
+      - name: Cache Homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew # Default Homebrew cache location
+          key: ${{ runner.os }}-brew-${{ hashFiles('**/Brewfile') }} # Or use a fixed key if no Brewfile
+          restore-keys: |
+            ${{ runner.os }}-brew-
+
+      - name: Install build tools (fswatch, create-dmg)
         run: |
           brew install fswatch
-          brew install rsync
           brew install create-dmg
 
       - name: Run build script
@@ -54,7 +68,8 @@ jobs:
           chmod -R 755 "${APP_PATH}"
           echo "Ensuring bundled binaries are executable..."
           chmod +x "${APP_PATH}/Contents/MacOS/fswatch" || echo "Warning: Failed to chmod fswatch"
-          chmod +x "${APP_PATH}/Contents/MacOS/rsync" || echo "Warning: Failed to chmod rsync" # Updated comment
+          # Removed chmod for rsync as it's not bundled by build_app.py
+          chmod +x "${APP_PATH}/Contents/MacOS/syncthing" || echo "Warning: Failed to chmod syncthing" # Added for syncthing
           echo "Permissions fixed."
 
       # --- Release Steps (only run on tag push) ---

@@ -164,11 +164,8 @@ def build_app(args):
     syncthing_path = find_required_binary("syncthing")
     print("Required binaries located successfully.")
 
-    # Make sure dependencies are installed
+    # Make sure dependencies are installed (Pillow should be in requirements.txt now)
     subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
-    
-    # Add Pillow for icon creation
-    subprocess.run([sys.executable, "-m", "pip", "install", "Pillow"], check=True)
     
     # Ensure icon exists and get its path
     icon_path, icns_path = ensure_icon_exists()
