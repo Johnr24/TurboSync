@@ -259,7 +259,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 process, error_msg = start_syncthing_daemon( # Capture process object
                     instance_id="source",
                     config_dir=SYNCTHING_CONFIG_DIR_SOURCE,
-                        api_address=None, # Not used
+                        api_address=self.config.get('syncthing_api_address_source'), # Pass API address from config
                         gui_address=gui_addr_source,
                         log_file=SYNCTHING_LOG_FILE_SOURCE
                     )
@@ -307,7 +307,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 process, error_msg = start_syncthing_daemon( # Capture process object
                     instance_id="dest",
                     config_dir=SYNCTHING_CONFIG_DIR_DEST,
-                        api_address=None, # Not used
+                        api_address=self.config.get('syncthing_api_address_dest'), # Pass API address from config
                         gui_address=gui_addr_dest,
                         log_file=SYNCTHING_LOG_FILE_DEST
                     )

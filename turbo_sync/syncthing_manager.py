@@ -167,18 +167,14 @@ def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, lo
         syncthing_exe,
         f"--home={config_dir}",
         "--no-browser",
+        # Add API address if provided
+        # Note: Syncthing >= 1.19 uses --api, older might rely on gui-address.
+        # Assuming modern Syncthing for now.
+        *( [f"--api={api_address}"] if api_address else [] ), # Add --api flag if api_address is truthy
         f"--gui-address={gui_address}", # Use separate GUI address
-        # f"--listen={api_address}",      # Removed - Caused errors with Syncthing v1.29.5
         f"--logfile={log_file}",
         "--log-max-old-files=3"
     ]
-    # Note: --listen sets the API address. --gui-address sets the GUI address.
-    # If using Syncthing < 1.19, the API might listen on the gui-address.
-    # If using Syncthing >= 1.19, explicitly setting --api is preferred.
-    # For broader compatibility, we might rely on gui-address for API initially,
-    # or add logic to check Syncthing version if needed.
-    # Let's assume for now gui-address works for API for broader compatibility.
-    # If issues arise, add the --api flag.
 
     logger.info(f"Starting Syncthing daemon ({instance_id}) with command: {' '.join(cmd)}")
     process = None # Initialize process to None
