@@ -149,14 +149,6 @@ def check_dependencies():
 
     # Check if fswatch is available if file watching is enabled
     fswatch_config = get_fswatch_config()
-         rumps.notification(
-             "TurboSync Error",
-             "Syncthing Not Found",
-             "Could not find the bundled Syncthing executable. Please rebuild the application.",
-             sound=True
-         )
-         return False # Critical dependency missing
-
     if fswatch_config['watch_enabled']:
         if is_fswatch_available():
             logging.info("fswatch is available.")
