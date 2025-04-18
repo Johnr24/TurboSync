@@ -263,28 +263,28 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                         gui_address=gui_addr_source,
                         log_file=SYNCTHING_LOG_FILE_SOURCE
                     )
-                    if not process:
-                        # start_syncthing_daemon already logged the error
-                        rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Could not start: {error_msg[:100]}...")
-                        self.syncthing_process_source = None # Ensure it's None
-                    else:
-                        # Check if the process exited quickly (start_syncthing_daemon waits ~2s)
-                        exit_code = process.poll()
-                        if exit_code is not None:
-                             stderr_output = "Could not read stderr."
-                             try:
-                                 stderr_output = process.stderr.read()
-                             except Exception as e:
-                                 logging.error(f"Error reading stderr from failed source process: {e}")
+                if not process:
+                    # start_syncthing_daemon already logged the error
+                    rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Could not start: {error_msg[:100]}...")
+                    self.syncthing_process_source = None # Ensure it's None
+                else:
+                    # Check if the process exited quickly (start_syncthing_daemon waits ~2s)
+                    exit_code = process.poll()
+                    if exit_code is not None:
+                         stderr_output = "Could not read stderr."
+                         try:
+                             stderr_output = process.stderr.read()
+                         except Exception as e:
+                             logging.error(f"Error reading stderr from failed source process: {e}")
 
-                             logging.error(f"Syncthing source daemon (PID: {process.pid}) exited immediately with code {exit_code}.")
-                             logging.error(f"Syncthing source stderr:\n---\n{stderr_output}\n---")
-                             rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Exited immediately (code {exit_code}). Check logs.")
-                             self.syncthing_process_source = None # Mark as failed
-                        else:
-                             # Process is still running after the initial sleep
-                             logging.info(f"Syncthing source daemon started successfully (PID: {process.pid}).")
-                             self.syncthing_process_source = process # Store the running process
+                         logging.error(f"Syncthing source daemon (PID: {process.pid}) exited immediately with code {exit_code}.")
+                         logging.error(f"Syncthing source stderr:\n---\n{stderr_output}\n---")
+                         rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Exited immediately (code {exit_code}). Check logs.")
+                         self.syncthing_process_source = None # Mark as failed
+                    else:
+                         # Process is still running after the initial sleep
+                         logging.info(f"Syncthing source daemon started successfully (PID: {process.pid}).")
+                         self.syncthing_process_source = process # Store the running process
                 # else: # <-- REMOVED BLOCK related to generate_syncthing_config failure
                 #     logging.error("Failed to generate initial config for source instance. Daemon not started.")
                 #     rumps.notification("TurboSync Error", "Syncthing Source Config Failed", "Could not generate initial config.")
