@@ -295,6 +295,17 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         # --- Initialize Source Client ---
         api_addr_source = self.config.get('syncthing_api_address_source')
         api_key_source = None
+        # --- Add logging before the check ---
+        source_process_status = "Not Set"
+        source_poll_result = "N/A"
+        if self.syncthing_process_source:
+            source_process_status = "Set"
+            try:
+                source_poll_result = self.syncthing_process_source.poll()
+            except Exception as e:
+                 source_poll_result = f"Error polling: {e}"
+        logger.debug(f"Checking Source Syncthing process before API key retrieval: Process={source_process_status}, Poll={source_poll_result}")
+        # --- End added logging ---
         if self.syncthing_process_source and self.syncthing_process_source.poll() is None:
             logger.info("Attempting to retrieve API key from Source Syncthing config.xml...")
             # time.sleep(1) # Removed - get_api_key_from_config now handles retries
@@ -319,6 +330,17 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         # --- Initialize Destination Client ---
         api_addr_dest = self.config.get('syncthing_api_address_dest')
         api_key_dest = None
+        # --- Add logging before the check ---
+        dest_process_status = "Not Set"
+        dest_poll_result = "N/A"
+        if self.syncthing_process_dest:
+            dest_process_status = "Set"
+            try:
+                dest_poll_result = self.syncthing_process_dest.poll()
+            except Exception as e:
+                 dest_poll_result = f"Error polling: {e}"
+        logger.debug(f"Checking Dest Syncthing process before API key retrieval: Process={dest_process_status}, Poll={dest_poll_result}")
+        # --- End added logging ---
         if self.syncthing_process_dest and self.syncthing_process_dest.poll() is None:
             logger.info("Attempting to retrieve API key from Destination Syncthing config.xml...")
             # time.sleep(1) # Removed - get_api_key_from_config now handles retries
