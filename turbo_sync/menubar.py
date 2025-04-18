@@ -360,14 +360,16 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             return
 
         # --- Initialize Source Client (only if process is running) ---
-        api_addr_source = self.config.get('syncthing_api_address_source')
+        # api_addr_source = self.config.get('syncthing_api_address_source') # <-- No longer used for client init
+        gui_addr_source = self.config.get('syncthing_gui_address_source') # <-- Use GUI address
         if self.syncthing_process_source and self.syncthing_process_source.poll() is None:
             logger.info("Source Syncthing process is running. Attempting to initialize API client...")
             api_key_source = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_SOURCE)
-            if api_key_source and api_addr_source:
+            if api_key_source and gui_addr_source: # <-- Check gui_addr_source
                 try:
-                    self.api_client_source = SyncthingApiClient(api_key=api_key_source, address=api_addr_source)
-                    logging.info("Source Syncthing API client initialized successfully.")
+                    # Use gui_addr_source for the client's address
+                    self.api_client_source = SyncthingApiClient(api_key=api_key_source, address=gui_addr_source)
+                    logging.info(f"Source Syncthing API client initialized successfully (using GUI address: {gui_addr_source}).") # Log GUI address used
                 except Exception as api_e:
                     logging.error(f"Failed to initialize Source Syncthing API client: {api_e}")
                     rumps.notification("TurboSync Error", "Source API Error", f"Could not connect: {api_e}")
@@ -376,22 +378,24 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 if not api_key_source:
                     logging.error("Source Syncthing API key not found in config.xml.")
                     rumps.notification("TurboSync Warning", "Source API Key Missing", "Cannot connect to source Syncthing.")
-                if not api_addr_source:
-                    logging.error("Source Syncthing API address missing in config.")
+                if not gui_addr_source: # <-- Check gui_addr_source
+                    logging.error("Source Syncthing GUI address missing in config.") # Log GUI address missing
                 self.api_client_source = None
         else:
             logging.warning("Source Syncthing process is not running. Skipping API client initialization.")
             self.api_client_source = None
 
         # --- Initialize Destination Client (only if process is running) ---
-        api_addr_dest = self.config.get('syncthing_api_address_dest')
+        # api_addr_dest = self.config.get('syncthing_api_address_dest') # <-- No longer used for client init
+        gui_addr_dest = self.config.get('syncthing_gui_address_dest') # <-- Use GUI address
         if self.syncthing_process_dest and self.syncthing_process_dest.poll() is None:
             logger.info("Destination Syncthing process is running. Attempting to initialize API client...")
             api_key_dest = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_DEST)
-            if api_key_dest and api_addr_dest:
+            if api_key_dest and gui_addr_dest: # <-- Check gui_addr_dest
                 try:
-                    self.api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=api_addr_dest)
-                    logging.info("Destination Syncthing API client initialized successfully.")
+                    # Use gui_addr_dest for the client's address
+                    self.api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=gui_addr_dest)
+                    logging.info(f"Destination Syncthing API client initialized successfully (using GUI address: {gui_addr_dest}).") # Log GUI address used
                 except Exception as api_e:
                     logging.error(f"Failed to initialize Destination Syncthing API client: {api_e}")
                     rumps.notification("TurboSync Error", "Dest API Error", f"Could not connect: {api_e}")
@@ -400,8 +404,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 if not api_key_dest:
                     logging.error("Destination Syncthing API key not found in config.xml.")
                     rumps.notification("TurboSync Warning", "Dest API Key Missing", "Cannot connect to destination Syncthing.")
-                if not api_addr_dest:
-                    logging.error("Destination Syncthing API address missing in config.")
+                if not gui_addr_dest: # <-- Check gui_addr_dest
+                    logging.error("Destination Syncthing GUI address missing in config.") # Log GUI address missing
                 self.api_client_dest = None
         else:
             logging.warning("Destination Syncthing process is not running. Skipping API client initialization.")
