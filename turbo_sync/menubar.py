@@ -232,26 +232,37 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             logging.warning("Cannot start Syncthing daemons: Configuration is invalid.")
             return
 
-        from .syncthing_manager import get_syncthing_executable_path
-        syncthing_exe = get_syncthing_executable_path()
-        if not syncthing_exe:
-            logging.error("Syncthing executable not found. Cannot start daemons.")
-            rumps.notification("TurboSync Error", "Syncthing Not Found", "Cannot start Syncthing.")
-            return
+        # --- Executable check moved inside start blocks ---
 
         # --- Start Source Instance ---
-        if self.syncthing_process_source and self.syncthing_process_source.poll() is None:
-            logging.info("Syncthing source daemon already running.")
+        gui_addr_source = self.config.get('syncthing_gui_address_source')
+        if not gui_addr_source:
+            logging.error("Source Syncthing GUI address missing in config. Cannot check or start.")
+            self.syncthing_process_source = None
         else:
-            logging.info("Preparing to start Syncthing source daemon...")
-            # api_addr_source = self.config.get('syncthing_api_address_source') # Not used in command
-            gui_addr_source = self.config.get('syncthing_gui_address_source')
-            if not gui_addr_source:
-                 logging.error("Source Syncthing GUI address missing in config.")
-                 self.syncthing_process_source = None
+            # Check if already running using health check (no API key needed)
+            logger.info(f"Checking health of potential existing source instance at {gui_addr_source}...")
+            # Need SyncthingApiClient for health check
+            from .syncthing_manager import SyncthingApiClient
+            temp_client_source = SyncthingApiClient(api_key='dummy', address=gui_addr_source) # Dummy key for health check
+            if temp_client_source.check_health():
+                logger.info("Detected already running Syncthing source instance (via health check). Will attempt to use it.")
+                self.syncthing_process_source = 'already_running' # Placeholder
             else:
-                # logging.info("Generating initial config for source instance...") # <-- REMOVED
-                # if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_SOURCE): # <-- REMOVED
+                logger.info("No running source instance detected or health check failed. Attempting to start...")
+                # Get executable path only if we need to start it
+                from .syncthing_manager import get_syncthing_executable_path
+                syncthing_exe = get_syncthing_executable_path()
+                if not syncthing_exe:
+                    logging.error("Syncthing executable not found. Cannot start source daemon.")
+                    rumps.notification("TurboSync Error", "Syncthing Not Found", "Cannot start Syncthing source.")
+                    self.syncthing_process_source = None
+                    # Skip trying to start destination if executable is missing
+                    self.syncthing_process_dest = None # Ensure dest is also marked as not started
+                    self._initialize_api_clients() # Call init to handle the None state
+                    return # Exit the start function
+
+                # --- Existing start logic follows ---
                 logging.info("Attempting to start Syncthing source daemon...")
                 process, error_msg = start_syncthing_daemon( # Capture process object
                     instance_id="source",
@@ -286,20 +297,38 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 #     logging.error("Failed to generate initial config for source instance. Daemon not started.")
                 #     rumps.notification("TurboSync Error", "Syncthing Source Config Failed", "Could not generate initial config.")
                 #     self.syncthing_process_source = None
+                # --- End of existing start logic ---
 
         # --- Start Destination Instance ---
-        if self.syncthing_process_dest and self.syncthing_process_dest.poll() is None:
-            logging.info("Syncthing destination daemon already running.")
+        gui_addr_dest = self.config.get('syncthing_gui_address_dest')
+        if not gui_addr_dest:
+            logging.error("Destination Syncthing GUI address missing in config. Cannot check or start.")
+            self.syncthing_process_dest = None
         else:
-            logging.info("Preparing to start Syncthing destination daemon...")
-            # api_addr_dest = self.config.get('syncthing_api_address_dest') # Not used in command
-            gui_addr_dest = self.config.get('syncthing_gui_address_dest')
-            if not gui_addr_dest:
-                 logging.error("Destination Syncthing GUI address missing in config.")
-                 self.syncthing_process_dest = None
+            # Check if already running
+            logger.info(f"Checking health of potential existing destination instance at {gui_addr_dest}...")
+            # Need SyncthingApiClient for health check (might already be imported)
+            from .syncthing_manager import SyncthingApiClient
+            temp_client_dest = SyncthingApiClient(api_key='dummy', address=gui_addr_dest)
+            if temp_client_dest.check_health():
+                logger.info("Detected already running Syncthing destination instance (via health check). Will attempt to use it.")
+                self.syncthing_process_dest = 'already_running'
             else:
-                # logging.info("Generating initial config for destination instance...") # <-- REMOVED
-                # if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_DEST): # <-- REMOVED
+                logger.info("No running destination instance detected or health check failed. Attempting to start...")
+                # Get executable path again (in case source failed before this or was already running)
+                # Avoid re-importing if already imported successfully for source
+                if 'syncthing_exe' not in locals():
+                    from .syncthing_manager import get_syncthing_executable_path
+                    syncthing_exe = get_syncthing_executable_path() # Re-check in case source failed or was running
+
+                if not syncthing_exe: # Check if executable is available
+                    logging.error("Syncthing executable not found. Cannot start destination daemon.")
+                    # Don't show notification again if source already failed
+                    self.syncthing_process_dest = None
+                    self._initialize_api_clients() # Call init
+                    return # Exit
+
+                # --- Existing start logic follows ---
                 logging.info("Attempting to start Syncthing destination daemon...")
                 process, error_msg = start_syncthing_daemon( # Capture process object
                     instance_id="dest",
@@ -334,8 +363,9 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 #     logging.error("Failed to generate initial config for destination instance. Daemon not started.")
                 #     rumps.notification("TurboSync Error", "Syncthing Dest Config Failed", "Could not generate initial config.")
                 #     self.syncthing_process_dest = None
+                # --- End of existing start logic ---
 
-        # --- Initialize API Clients (only if daemons are actually running) ---
+        # --- Initialize API Clients (only if daemons are actually running or detected) ---
         self._initialize_api_clients()
 
     def _initialize_api_clients(self):
