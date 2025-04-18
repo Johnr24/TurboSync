@@ -253,12 +253,12 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                  logging.error("Source Syncthing GUI address missing in config.")
                  self.syncthing_process_source = None
             else:
-                logging.info("Generating initial config for source instance...")
-                if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_SOURCE):
-                    logging.info("Attempting to start Syncthing source daemon...")
-                    process, error_msg = start_syncthing_daemon( # Capture process object
-                        instance_id="source",
-                        config_dir=SYNCTHING_CONFIG_DIR_SOURCE,
+                # logging.info("Generating initial config for source instance...") # <-- REMOVED
+                # if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_SOURCE): # <-- REMOVED
+                logging.info("Attempting to start Syncthing source daemon...")
+                process, error_msg = start_syncthing_daemon( # Capture process object
+                    instance_id="source",
+                    config_dir=SYNCTHING_CONFIG_DIR_SOURCE,
                         api_address=None, # Not used
                         gui_address=gui_addr_source,
                         log_file=SYNCTHING_LOG_FILE_SOURCE
@@ -285,10 +285,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                              # Process is still running after the initial sleep
                              logging.info(f"Syncthing source daemon started successfully (PID: {process.pid}).")
                              self.syncthing_process_source = process # Store the running process
-                else:
-                    logging.error("Failed to generate initial config for source instance. Daemon not started.")
-                    rumps.notification("TurboSync Error", "Syncthing Source Config Failed", "Could not generate initial config.")
-                    self.syncthing_process_source = None
+                # else: # <-- REMOVED BLOCK related to generate_syncthing_config failure
+                #     logging.error("Failed to generate initial config for source instance. Daemon not started.")
+                #     rumps.notification("TurboSync Error", "Syncthing Source Config Failed", "Could not generate initial config.")
+                #     self.syncthing_process_source = None
 
         # --- Start Destination Instance ---
         if self.syncthing_process_dest and self.syncthing_process_dest.poll() is None:
@@ -301,12 +301,12 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                  logging.error("Destination Syncthing GUI address missing in config.")
                  self.syncthing_process_dest = None
             else:
-                logging.info("Generating initial config for destination instance...")
-                if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_DEST):
-                    logging.info("Attempting to start Syncthing destination daemon...")
-                    process, error_msg = start_syncthing_daemon( # Capture process object
-                        instance_id="dest",
-                        config_dir=SYNCTHING_CONFIG_DIR_DEST,
+                # logging.info("Generating initial config for destination instance...") # <-- REMOVED
+                # if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_DEST): # <-- REMOVED
+                logging.info("Attempting to start Syncthing destination daemon...")
+                process, error_msg = start_syncthing_daemon( # Capture process object
+                    instance_id="dest",
+                    config_dir=SYNCTHING_CONFIG_DIR_DEST,
                         api_address=None, # Not used
                         gui_address=gui_addr_dest,
                         log_file=SYNCTHING_LOG_FILE_DEST
@@ -333,10 +333,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                              # Process is still running after the initial sleep
                              logging.info(f"Syncthing destination daemon started successfully (PID: {process.pid}).")
                              self.syncthing_process_dest = process # Store the running process
-                else:
-                    logging.error("Failed to generate initial config for destination instance. Daemon not started.")
-                    rumps.notification("TurboSync Error", "Syncthing Dest Config Failed", "Could not generate initial config.")
-                    self.syncthing_process_dest = None
+                # else: # <-- REMOVED BLOCK related to generate_syncthing_config failure
+                #     logging.error("Failed to generate initial config for destination instance. Daemon not started.")
+                #     rumps.notification("TurboSync Error", "Syncthing Dest Config Failed", "Could not generate initial config.")
+                #     self.syncthing_process_dest = None
 
         # --- Initialize API Clients (only if daemons are actually running) ---
         self._initialize_api_clients()
