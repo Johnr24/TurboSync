@@ -297,8 +297,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         api_key_source = None
         if self.syncthing_process_source and self.syncthing_process_source.poll() is None:
             logger.info("Attempting to retrieve API key from Source Syncthing config.xml...")
-            # Give Syncthing a bit more time to generate the config if needed
-            time.sleep(1)
+            # time.sleep(1) # Removed - get_api_key_from_config now handles retries
             api_key_source = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_SOURCE)
 
         if api_key_source and api_addr_source:
@@ -322,7 +321,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         api_key_dest = None
         if self.syncthing_process_dest and self.syncthing_process_dest.poll() is None:
             logger.info("Attempting to retrieve API key from Destination Syncthing config.xml...")
-            time.sleep(1) # Give it time too
+            # time.sleep(1) # Removed - get_api_key_from_config now handles retries
             api_key_dest = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_DEST)
 
         if api_key_dest and api_addr_dest:
