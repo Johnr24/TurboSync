@@ -348,41 +348,51 @@ def get_api_key_from_config(config_dir, retries=10, delay=0.5):
     Retries for a short period to allow Syncthing time to generate the file.
     """
     config_path = os.path.join(config_dir, 'config.xml')
-    logger.debug(f"Attempting to read API key from: {config_path}")
+    logger.debug(f"Attempting to read API key from: {config_path} (will retry up to {retries} times)")
 
     for attempt in range(retries):
+        logger.debug(f"API Key Retrieval Attempt {attempt + 1}/{retries} for {config_dir}")
         if os.path.exists(config_path):
+            logger.debug(f"  Config file exists: {config_path}")
             try:
                 import xml.etree.ElementTree as ET
                 tree = ET.parse(config_path)
+                logger.debug("  Successfully parsed config.xml")
                 root = tree.getroot()
                 gui_element = root.find('./gui')
                 if gui_element is not None:
+                    logger.debug("  Found 'gui' element")
                     api_key_element = gui_element.find('./apikey')
-                    if api_key_element is not None and api_key_element.text:
-                        api_key = api_key_element.text.strip()
-                        if api_key: # Ensure key is not empty
-                            logger.info(f"Successfully retrieved API key from config.xml (attempt {attempt + 1})")
-                            return api_key
-                        else:
-                             logger.debug(f"API key element found but empty in config.xml (attempt {attempt + 1}). Retrying...")
+                    if api_key_element is not None:
+                         logger.debug("  Found 'apikey' element")
+                         if api_key_element.text:
+                             api_key = api_key_element.text.strip()
+                             if api_key: # Ensure key is not empty after stripping
+                                 logger.info(f"Successfully retrieved API key from config.xml (attempt {attempt + 1})")
+                                 return api_key
+                             else:
+                                 logger.debug(f"  API key element text is empty or whitespace (attempt {attempt + 1}). Retrying...")
+                         else:
+                              logger.debug(f"  API key element has no text content (attempt {attempt + 1}). Retrying...")
                     else:
-                        logger.debug(f"API key element not found in config.xml (attempt {attempt + 1}). Retrying...")
+                        logger.debug(f"  'apikey' element not found within 'gui' (attempt {attempt + 1}). Retrying...")
                 else:
-                    logger.debug(f"GUI element not found in config.xml (attempt {attempt + 1}). Retrying...")
+                    logger.debug(f"  'gui' element not found in config.xml root (attempt {attempt + 1}). Retrying...")
 
             except ImportError:
                 logger.error("xml.etree.ElementTree not available. Cannot parse config.xml for API key.")
                 return None # Fatal error, don't retry
             except ET.ParseError as e:
-                # Config file might be partially written, wait and retry
-                logger.warning(f"Error parsing Syncthing config.xml (attempt {attempt + 1}): {e}. Retrying...")
+                # Config file might be partially written or invalid XML
+                logger.warning(f"  Error parsing Syncthing config.xml (attempt {attempt + 1}): {e}. Retrying...")
             except Exception as e:
-                logger.exception(f"Unexpected error reading API key from config.xml (attempt {attempt + 1}): {e}. Retrying...")
+                # Catch any other unexpected errors during file reading/parsing
+                logger.exception(f"  Unexpected error reading/parsing API key from config.xml (attempt {attempt + 1}): {e}. Retrying...")
         else:
-            logger.debug(f"Syncthing config file not found at {config_path} (attempt {attempt + 1}). Retrying...")
+            logger.debug(f"  Config file not found at {config_path} (attempt {attempt + 1}). Retrying...")
 
         # Wait before the next attempt
+        logger.debug(f"  Waiting {delay}s before next attempt...")
         time.sleep(delay)
 
     logger.error(f"Failed to retrieve API key from {config_path} after {retries} attempts.")
