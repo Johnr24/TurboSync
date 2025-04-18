@@ -26,13 +26,26 @@ def get_syncthing_executable_path():
         logger.debug(f"Running bundled, expecting syncthing at: {executable_path}")
     else:
         # Running as a script (development)
-        # Assume syncthing is in PATH or use shutil.which
-        import shutil
-        executable_path = shutil.which('syncthing')
-        logger.debug(f"Running from script, found syncthing via which: {executable_path}")
+        # 1. Check project root directory first
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        root_executable_path = os.path.join(project_root, 'syncthing')
+        logger.debug(f"Running from script, checking project root: {root_executable_path}")
+        if os.path.exists(root_executable_path) and os.access(root_executable_path, os.X_OK):
+            executable_path = root_executable_path
+            logger.debug(f"Found syncthing in project root: {executable_path}")
+        else:
+            # 2. Fallback to checking system PATH
+            logger.debug("Syncthing not found in project root, checking system PATH...")
+            import shutil
+            executable_path = shutil.which('syncthing')
+            logger.debug(f"Found syncthing via which: {executable_path}")
 
     if executable_path and os.path.exists(executable_path):
-        logger.info(f"Found Syncthing executable: {executable_path}")
+        # Ensure the found executable is actually executable
+        if not os.access(executable_path, os.X_OK):
+            logger.error(f"Found Syncthing at {executable_path}, but it is not executable.")
+            return None
+        logger.info(f"Using Syncthing executable: {executable_path}")
         return executable_path
     else:
         logger.error("Syncthing executable not found.")
