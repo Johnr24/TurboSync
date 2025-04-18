@@ -181,7 +181,7 @@ import requests # Import requests library
 
 # --- Syncthing API Client ---
 class SyncthingApiClient:
-    def __init__(self, api_key, address=DEFAULT_SYNCTHING_API_ADDRESS):
+    def __init__(self, api_key, address):
         if not api_key:
              raise ValueError("API key is required for SyncthingApiClient")
         self.api_key = api_key
