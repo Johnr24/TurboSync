@@ -175,24 +175,32 @@ def find_livework_dirs(config):
 # Removed perform_sync (rsync specific)
 
 # --- New Syncthing Configuration Update Logic ---
-from .syncthing_manager import SyncthingApiClient, get_api_key_from_config, SYNCTHING_CONFIG_DIR, DEFAULT_SYNCTHING_API_ADDRESS
-# TODO: SYNCTHING_CONFIG_DIR and DEFAULT_SYNCTHING_API_ADDRESS need updating for two instances
+from .syncthing_manager import SyncthingApiClient # Keep API client import
+# Define APP_NAME here if not already defined globally in this file
+APP_NAME = "TurboSync"
 
-def update_syncthing_configuration():
+def update_syncthing_configuration(api_client_source: SyncthingApiClient, api_client_dest: SyncthingApiClient):
     """
     Finds .livework directories, compares with current Syncthing config,
     and updates BOTH local Syncthing daemon configurations via API to sync
     the corresponding folders between them.
+
+    Args:
+        api_client_source: Initialized SyncthingApiClient for the source instance.
+        api_client_dest: Initialized SyncthingApiClient for the destination instance.
     """
-    # !!! This function needs a major rewrite for the two-instance model !!!
     logger.info("Starting Syncthing configuration update process...")
     config_updated = False
     error_occurred = False
     message = "Configuration update check completed."
 
     try:
+        # Check if API clients are provided
+        if not api_client_source or not api_client_dest:
+             raise ValueError("API clients for source and destination instances are required.")
+
         # 1. Load TurboSync Configuration
-        user_env_path = os.path.join(os.path.expanduser(f'~/Library/Application Support/TurboSync'), '.env')
+        user_env_path = os.path.join(os.path.expanduser(f'~/Library/Application Support/{APP_NAME}'), '.env')
         config = load_config(dotenv_path=user_env_path) # load_config now returns dict always
 
         # --- Check if config is valid before proceeding ---
@@ -206,28 +214,7 @@ def update_syncthing_configuration():
         local_base_dir = config['local_dir']
         source_base_dir = config['source_dir'] # Renamed from mounted_path
 
-        api_addr_source = config['syncthing_api_address_source']
-        api_key_source = config.get('syncthing_api_key_source')
-        # TODO: Need separate config dir logic for source instance
-        # config_dir_source = os.path.join(USER_CONFIG_DIR, 'syncthing_config_source')
-
-        api_addr_dest = config['syncthing_api_address_dest']
-        api_key_dest = config.get('syncthing_api_key_dest')
-        # TODO: Need separate config dir logic for dest instance
-        # config_dir_dest = os.path.join(USER_CONFIG_DIR, 'syncthing_config_dest')
-
-        # 2. Initialize Syncthing API Clients (for both instances)
-        # TODO: Refactor API key retrieval for two instances
-        # if not api_key_source: api_key_source = get_api_key_from_config(config_dir=config_dir_source)
-        # if not api_key_dest: api_key_dest = get_api_key_from_config(config_dir=config_dir_dest)
-
-        if not api_key_source or not api_addr_source:
-             raise ValueError("Source Syncthing API Key or Address missing.")
-        if not api_key_dest or not api_addr_dest:
-             raise ValueError("Destination Syncthing API Key or Address missing.")
-
-        api_client_source = SyncthingApiClient(api_key=api_key_source, address=api_addr_source)
-        api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=api_addr_dest)
+        # API Clients are passed in, no need to initialize here
 
         # 3. Find .livework Directories
         logger.info("Scanning for .livework directories...")
@@ -239,8 +226,7 @@ def update_syncthing_configuration():
             # TODO: Implement removal logic if desired.
 
         # Map found source paths (from mounted volume) to desired local paths and folder IDs
-        desired_folders = {} # {folder_id: {'local_path': '/path/to/local', 'source_path': '/path/to/source'}}
-        base_mounted_path = config['mounted_path'] # Use the validated mounted path
+        desired_folders = {} # {folder_id: {'dest_path': '/path/to/local', 'source_path': '/path/to/source'}}
 
         for source_path in livework_source_paths: # Variable name kept for now, but it's the source path on the mount
             # Derive local path relative to the local_base_dir
@@ -262,7 +248,9 @@ def update_syncthing_configuration():
             folder_id = re.sub(r'[\\/:"*?<>|]+', '_', rel_path) # Replace invalid chars
             folder_id = folder_id.replace(' ', '_').replace('.', '_livework') # Replace space and dot
             if not folder_id or folder_id == '_livework': # Handle base directory case
-                 folder_id = os.path.basename(local_base_dir) + '_livework_base'
+                 # Use basename of the *source* dir for uniqueness if base is synced
+                 base_name = os.path.basename(source_base_dir) or "source_base"
+                 folder_id = base_name + '_livework_base'
             # Truncate if too long (Syncthing might have limits) - adjust limit as needed
             folder_id = folder_id[:64] # Example limit
 
@@ -272,10 +260,10 @@ def update_syncthing_configuration():
 
             # Store both paths for the folder ID
             desired_folders[folder_id] = {'dest_path': local_path, 'source_path': source_path}
-            logger.debug(f"Desired folder: ID='{folder_id}', Local='{local_path}', Source='{source_path}'")
+            logger.debug(f"Desired folder: ID='{folder_id}', Dest='{local_path}', Source='{source_path}'")
 
         # 4. Get Current Syncthing Configuration
-        # TODO: Need to fetch config for BOTH instances
+        # Fetch config for BOTH instances using the provided clients
         logger.info("Fetching current Syncthing configurations via API...")
         current_config_source = api_client_source.get_config()
         current_config_dest = api_client_dest.get_config()
@@ -294,7 +282,7 @@ def update_syncthing_configuration():
 
 
         # 5. Get Local Device ID
-        # TODO: Get Device IDs for BOTH local instances
+        # Get Device IDs for BOTH local instances using the provided clients
         device_id_source = None
         device_id_dest = None
 
@@ -313,8 +301,7 @@ def update_syncthing_configuration():
             raise ConnectionError("Could not determine Destination Syncthing Device ID from API.")
 
         # 6. Compare and Update Folders
-        # TODO: This logic needs to be applied to BOTH config_source and config_dest
-        # Example for Source Instance (needs adaptation for Dest instance)
+        # --- Update Source Instance Folders ---
         current_folder_ids_source = {f.get('id') for f in new_config_source['folders']}
         desired_folder_ids = set(desired_folders.keys()) # Same desired folders for both
 
@@ -357,24 +344,67 @@ def update_syncthing_configuration():
                          logger.info(f"Sharing existing folder '{folder_id}' in Source config with Dest device '{device_id_dest}'.")
                          if 'devices' not in new_config_source['folders'][i]:
                              new_config_source['folders'][i]['devices'] = []
-                         if not any(d.get('deviceID') == device_id_dest for d in new_config_source['folders'][i]['devices']):
+                         # Ensure the device entry is a dict
+                         if not any(isinstance(d, dict) and d.get('deviceID') == device_id_dest for d in new_config_source['folders'][i]['devices']):
                               new_config_source['folders'][i]['devices'].append({'deviceID': device_id_dest})
                               config_updated = True
                      break
 
-        # --- Repeat similar logic for Destination Instance ---
-        # (Add/Remove/Update folders in new_config_dest, using dest_path and sharing with device_id_source)
-        # ... (Implementation omitted for brevity, but follows the pattern above) ...
-        logger.warning("!!! Destination folder update logic not yet implemented in this diff !!!")
+        # --- Update Destination Instance Folders ---
+        current_folder_ids_dest = {f.get('id') for f in new_config_dest['folders']}
+        # desired_folder_ids is the same
 
+        folders_to_add_dest = desired_folder_ids - current_folder_ids_dest
+        folders_to_remove_dest = current_folder_ids_dest - desired_folder_ids
+        folders_to_keep_dest = current_folder_ids_dest.intersection(desired_folder_ids)
+
+        # Remove folders no longer desired (Dest)
+        if folders_to_remove_dest:
+            logger.info(f"Removing {len(folders_to_remove_dest)} folders from Dest Syncthing config: {folders_to_remove_dest}")
+            new_config_dest['folders'] = [f for f in new_config_dest['folders'] if f.get('id') not in folders_to_remove_dest]
+            config_updated = True # Mark that *some* config changed
+
+        # Add new folders (Dest)
+        for folder_id in folders_to_add_dest:
+            dest_path = desired_folders[folder_id]['dest_path']
+            logger.info(f"Adding folder '{folder_id}' ({dest_path}) to Dest Syncthing config.")
+            SyncthingApiClient.add_folder_to_config(
+                new_config_dest,
+                folder_id,
+                dest_path, # Use destination path for destination instance
+                devices=[device_id_source] # Share with Source instance
+            )
+            config_updated = True
+
+        # Update existing folders (Dest)
+        for folder_id in folders_to_keep_dest:
+             for i, folder in enumerate(new_config_dest['folders']):
+                 if folder.get('id') == folder_id:
+                     # Ensure path matches
+                     expected_dest_path = desired_folders[folder_id]['dest_path']
+                     if folder.get('path') != expected_dest_path:
+                          logger.warning(f"Updating path for existing folder '{folder_id}' in Dest config: '{folder.get('path')}' -> '{expected_dest_path}'")
+                          new_config_dest['folders'][i]['path'] = expected_dest_path
+                          config_updated = True
+                     # Ensure it's shared with the Source device
+                     shared_devices_dest = {d.get('deviceID') for d in folder.get('devices', [])}
+                     if device_id_source not in shared_devices_dest:
+                         logger.info(f"Sharing existing folder '{folder_id}' in Dest config with Source device '{device_id_source}'.")
+                         if 'devices' not in new_config_dest['folders'][i]:
+                             new_config_dest['folders'][i]['devices'] = []
+                         # Ensure the device entry is a dict
+                         if not any(isinstance(d, dict) and d.get('deviceID') == device_id_source for d in new_config_dest['folders'][i]['devices']):
+                              new_config_dest['folders'][i]['devices'].append({'deviceID': device_id_source})
+                              config_updated = True
+                     break
 
         # 7. Ensure Remote Device Exists
-        # TODO: Ensure BOTH instances know about EACH OTHER's device ID
+        # Ensure BOTH instances know about EACH OTHER's device ID
         # Check Source config for Dest device
         current_device_ids_source = {d.get('deviceID') for d in new_config_source['devices']}
         if device_id_dest not in current_device_ids_source:
             logger.info(f"Adding Dest device '{device_id_dest}' to Source Syncthing config.")
-            SyncthingApiClient.add_device_to_config( # Need add_device_to_config helper
+            SyncthingApiClient.add_device_to_config( # Use add_device_to_config helper
                 new_config_source,
                 device_id_dest,
                 f"TurboSync Peer (Dest - {device_id_dest[:7]}...)"
@@ -385,7 +415,7 @@ def update_syncthing_configuration():
         current_device_ids_dest = {d.get('deviceID') for d in new_config_dest['devices']}
         if device_id_source not in current_device_ids_dest:
              logger.info(f"Adding Source device '{device_id_source}' to Dest Syncthing config.")
-             SyncthingApiClient.add_device_to_config( # Need add_device_to_config helper
+             SyncthingApiClient.add_device_to_config( # Use add_device_to_config helper
                  new_config_dest,
                  device_id_source,
                  f"TurboSync Peer (Source - {device_id_source[:7]}...)"
@@ -396,7 +426,7 @@ def update_syncthing_configuration():
         # 8. Apply Configuration Changes (if any)
         if config_updated:
             logger.info("Applying updated configuration to Syncthing instances via API...")
-            # TODO: Apply updates to BOTH instances
+            # Apply updates to BOTH instances using the provided clients
             success_source = api_client_source.update_config(new_config_source)
             success_dest = api_client_dest.update_config(new_config_dest)
 

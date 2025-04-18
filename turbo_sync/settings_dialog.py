@@ -205,8 +205,7 @@ QPushButton:pressed {
                          widget.setToolTip("REST API address (e.g., 127.0.0.1:port). Ensure ports are unique.")
                     elif key == "SYNCTHING_GUI_ADDRESS_SOURCE" or key == "SYNCTHING_GUI_ADDRESS_DEST":
                          widget.setToolTip("Web GUI address (e.g., 127.0.0.1:port). Ensure ports are unique and different from API ports.")
-                    # elif key == "SYNCTHING_API_KEY_SOURCE" or key == "SYNCTHING_API_KEY_DEST":
-                    #     widget.setToolTip("API Key for TurboSync to control this Syncthing daemon. Leave blank to attempt auto-retrieval/generation on start.") # Tooltip removed
+                    # API Key fields removed
                     # Default behavior for other widget types
                     form_layout.addRow(QLabel(label_text), widget)
 
