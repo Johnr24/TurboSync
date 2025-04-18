@@ -159,9 +159,8 @@ def build_app(args):
     os.chdir(script_dir)
 
     # Find required binaries needed for bundling
-    print("Locating required binaries (fswatch, syncthing)...") # Removed rsync
+    print("Locating required binaries (fswatch, syncthing)...")
     fswatch_path = find_required_binary("fswatch")
-    # rsync_path = find_required_binary("rsync") # Removed rsync
     syncthing_path = find_required_binary("syncthing")
     print("Required binaries located successfully.")
 
