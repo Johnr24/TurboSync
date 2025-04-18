@@ -139,6 +139,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                  self._disable_features() # Disable most features
                  return # Stop initialization
 
+            # --- Add this line ---
+            self.cleanup_syncthing() # Ensure any old instances are stopped first
+            # --- End added line ---
+
             logging.debug(f"Loading configuration using path: {USER_ENV_PATH}")
             self.config = load_config(dotenv_path=USER_ENV_PATH) # load_config now always returns a dict
 
