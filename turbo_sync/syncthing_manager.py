@@ -342,7 +342,7 @@ class SyncthingApiClient:
         }
     # Add more static helpers as needed: add_device_to_config, share_folder_in_config, remove_folder_from_config
 
-def get_api_key_from_config(config_dir, retries=10, delay=0.5):
+def get_api_key_from_config(config_dir, retries=15, delay=0.5): # Increased retries
     """
     Reads the API key directly from Syncthing's config.xml.
     Retries for a short period to allow Syncthing time to generate the file.
