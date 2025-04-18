@@ -35,12 +35,20 @@ def get_syncthing_executable_path():
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         root_executable_path = os.path.join(project_root, 'syncthing')
         logger.debug(f"Running from script, checking project root: {root_executable_path}")
-        if os.path.exists(root_executable_path) and os.access(root_executable_path, os.X_OK):
-            executable_path = root_executable_path
-            logger.debug(f"Found syncthing in project root: {executable_path}")
+        if os.path.exists(root_executable_path):
+             if os.access(root_executable_path, os.X_OK):
+                 executable_path = root_executable_path
+                 logger.debug(f"Found executable syncthing in project root: {executable_path}")
+             else:
+                 logger.warning(f"Found syncthing in project root ({root_executable_path}), but it lacks execute permissions.")
+                 executable_path = None # Treat as not found if not executable
         else:
+             logger.debug(f"Syncthing file not found at project root path: {root_executable_path}")
+             executable_path = None
+
+        if executable_path is None:
             # 2. Fallback to checking system PATH
-            logger.debug("Syncthing not found in project root, checking system PATH...")
+            logger.debug("Syncthing not found or not executable in project root, checking system PATH...")
             import shutil
             executable_path = shutil.which('syncthing')
             logger.debug(f"Found syncthing via which: {executable_path}")
