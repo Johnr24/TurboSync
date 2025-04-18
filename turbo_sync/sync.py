@@ -15,24 +15,44 @@ if __name__ == "__main__":
 # Use root logger instead of configuring a separate one
 # This ensures compatibility with the logging setup in main.py
 logger = logging.getLogger(__name__)
- 
+
+# Define default values for configuration settings
+DEFAULT_CONFIG = {
+    'local_dir': '',
+    'sync_interval': 5,
+    'use_mounted_volume': True, # Keep this true as it's the primary mode now
+    'mounted_volume_path': '',
+    'remote_syncthing_device_id': '',
+    'syncthing_api_key': '',
+    'syncthing_listen_address': '127.0.0.1:8385',
+    'watch_local_files': True,
+    'watch_delay_seconds': 2,
+    'start_at_login': False,
+}
+
 def load_config(dotenv_path=None):
     """
-    Load configuration from .env file.
+    Load configuration from .env file if it exists, otherwise return defaults.
     Prioritizes the file specified by dotenv_path if provided.
+    Returns the config dictionary and a boolean indicating if a file was loaded.
     """
-    if dotenv_path and os.path.exists(dotenv_path):
-        logger.info(f"Loading configuration from specified path: {dotenv_path}")
-        load_dotenv(dotenv_path=dotenv_path, override=True)
+    config_loaded_from_file = False
+    # Use find_dotenv from python-dotenv to locate the .env file automatically
+    # if no specific path is given. This handles searching parent directories.
+    from dotenv import find_dotenv, dotenv_values
+    effective_dotenv_path = dotenv_path or find_dotenv() # Use find_dotenv if no path specified
+
+    if effective_dotenv_path and os.path.exists(effective_dotenv_path):
+        logger.info(f"Loading configuration from: {effective_dotenv_path}")
+        # Use dotenv_values to get dict without modifying os.environ directly initially
+        loaded_values = dotenv_values(dotenv_path=effective_dotenv_path)
+        config_loaded_from_file = True
+        logger.debug(f"Values loaded from file: {loaded_values}")
     else:
-        # Fallback to default behavior (searching current/parent dirs) if path not provided or doesn't exist
-        # This might be useful for development environments, but less so for the packaged app.
-        logger.warning(f"Specified dotenv_path '{dotenv_path}' not found or not provided. Falling back to default load_dotenv behavior.")
-        load_dotenv(override=True) # Original call
+        logger.info(f"No .env file found at '{effective_dotenv_path}'. Using default configuration values.")
+        loaded_values = {} # Start with empty dict, defaults will apply
 
-    logger.debug(f"Attempting to load configuration values after load_dotenv(override=True, path='{dotenv_path}')")
-    # logger.debug(f"RSYNC_OPTIONS from env: {os.getenv('RSYNC_OPTIONS')}") # No longer using rsync
-
+    # Build config dictionary, applying loaded values over defaults
     config = {}
     config['local_dir'] = loaded_values.get('LOCAL_DIR', DEFAULT_CONFIG['local_dir'])
     config['sync_interval'] = int(loaded_values.get('SYNC_INTERVAL', DEFAULT_CONFIG['sync_interval']))

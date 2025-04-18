@@ -91,95 +91,190 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.file_watcher = None
         self.watch_enabled = False # Will be updated by setup_file_watcher
         self.syncthing_process = None # Add state for Syncthing process
-        # self.last_sync_results = {} # Removed - Status comes from polling
         self.status_panel = None # Changed from self.status_panel_window
         self.syncthing_api_client = None # Add state for API client
         self.status_poll_timer = None # Timer for polling Syncthing status
+        self.scheduler_thread = None # Thread for scheduler
 
         # --- Define Items Needing State Management First ---
-        # Initial status reflects Syncthing state, not last rsync
         self.status_item = rumps.MenuItem("Status: Initializing...")
-        self.watch_toggle = rumps.MenuItem("Enable File Watching") # Title matches decorator
+        self.watch_toggle = rumps.MenuItem("Enable File Watching", callback=self.toggle_file_watching) # Add callback here
+        self.update_config_item = rumps.MenuItem("Update Syncthing Config", callback=self.update_syncthing_config_task)
+        self.status_dashboard_item = rumps.MenuItem("Open Sync Status Dashboard", callback=self.show_status_panel)
 
         # --- Define Complete Menu Structure ---
-        # Removed self.status_panel_item definition
-        # Construct the list with MenuItem objects included directly
         menu_items = [
-            self.status_item,       # Insert the MenuItem object
-            rumps.MenuItem("Update Syncthing Config", callback=self.update_syncthing_config_task), # Renamed "Sync Now"
-            rumps.MenuItem("Open Sync Status Dashboard", callback=self.show_status_panel), # Keep this
+            self.status_item,
+            self.update_config_item,
+            self.status_dashboard_item,
             "View Logs",
             None,                   # Separator
-           self.watch_toggle,      # Insert the MenuItem object
-            "Settings",
+            self.watch_toggle,
+            "Settings",             # Keep Settings always enabled
             None,                   # Separator
-            # Replace default Quit with custom one for cleanup
             rumps.MenuItem("Quit TurboSync", callback=self.quit_app),
-            # Removed duplicate "Open Sync Status Dashboard"
         ]
-        self.menu = menu_items      # Assign the final list to self.menu
+        self.menu = menu_items
 
-        # Synced projects submenu removed
+        # --- Load Configuration and Initialize ---
+        self._load_and_initialize()
 
-        # Load configuration
+    def _load_and_initialize(self):
+        """Loads configuration and initializes services based on validity."""
+        logging.info("Loading configuration and initializing services...")
         try:
+            # Ensure config dir exists (moved from main.py startup)
+            from turbo_sync.main import ensure_config_dir
+            if not ensure_config_dir():
+                 # Critical error, cannot proceed. Alert shown by ensure_config_dir.
+                 # Maybe disable all menu items except Quit and Settings?
+                 self.status_item.title = "Status: Config Dir Error"
+                 self._disable_features() # Disable most features
+                 return # Stop initialization
+
             logging.debug(f"Loading configuration using path: {USER_ENV_PATH}")
-            self.config = load_config(dotenv_path=USER_ENV_PATH) # Pass the path
-            if not self.config: # load_config might return None or raise error handled below
-                raise ValueError("load_config failed to return a valid configuration.")
-            logging.info(f"Configuration loaded, config check interval: {self.config['sync_interval']} minutes")
-            # Schedule the config update task
-            schedule.every(self.config['sync_interval']).minutes.do(self.scheduled_config_update)
+            self.config = load_config(dotenv_path=USER_ENV_PATH) # load_config now always returns a dict
 
-            # Set up file watcher if enabled (now triggers config update)
-            self.setup_file_watcher()
-
-            # --- Start Syncthing Daemon ---
-            logging.info("Attempting to start Syncthing daemon...")
-            # Get API and protocol addresses from config
-            api_addr = self.config.get('SYNCTHING_LISTEN_ADDRESS', DEFAULT_SYNCTHING_API_ADDRESS) # Use default if not set
-            # TODO: Add SYNCTHING_PROTOCOL_ADDRESS to config/settings dialog if needed
-            # proto_addr = None # Use default for now
-
-            self.syncthing_process, error_msg = start_syncthing_daemon(
-                api_address=api_addr,
-                # protocol_address=proto_addr # Pass if implemented
-            )
-            if not self.syncthing_process:
-                logging.error(f"Failed to start Syncthing daemon: {error_msg}")
-                rumps.notification("TurboSync Error", "Syncthing Failed", f"Could not start Syncthing: {error_msg}")
+            if self.config and self.config.get('is_valid'):
+                logging.info("Configuration loaded and valid. Initializing features.")
+                self.status_item.title = "Status: Initializing..." # Start with initializing status
+                self._enable_and_start_features()
             else:
-                logging.info(f"Syncthing daemon started (PID: {self.syncthing_process.pid}).")
-                # --- Initialize API Client ---
-                api_key = self.config.get('SYNCTHING_API_KEY')
-                if not api_key:
-                    # Try to get from config file if not in .env
-                    api_key = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR)
-                if api_key:
-                    try:
-                        self.syncthing_api_client = SyncthingApiClient(api_key=api_key, address=api_addr)
-                        # Start polling timer only if API client is ready
-                        self._start_status_poll_timer()
-                    except Exception as api_e: # Catch broader exceptions during init
-                        logging.error(f"Failed to initialize Syncthing API client: {api_e}")
-                        rumps.notification("TurboSync Error", "Syncthing API Error", f"Could not connect: {api_e}")
-                else:
-                    logging.error("Syncthing API key not found in config or config.xml. Status polling disabled.")
-                    rumps.notification("TurboSync Warning", "Syncthing API Key Missing", "Cannot poll status.")
-
-                # Register cleanup function
-                atexit.register(self.cleanup_syncthing)
+                # Config is missing or invalid
+                config_message = self.config.get('validation_message', "Configuration required.")
+                logging.warning(f"Configuration invalid or missing: {config_message}")
+                self.status_item.title = "Status: Configuration Required"
+                self._disable_features()
+                # Show notification prompting user to configure
+                rumps.notification(
+                    "TurboSync Setup",
+                    "Configuration Needed",
+                    "Please configure TurboSync via the Settings menu.",
+                    sound=True
+                )
 
         except Exception as e:
-            logging.error(f"Error loading configuration: {e}")
-            rumps.notification( # Reverted to rumps.notification
-                "TurboSync Configuration Error",
-                "Error loading configuration",
-                f"Please check your .env file: {str(e)}",
+            logging.exception(f"Critical error during initialization: {e}")
+            self.status_item.title = "Status: Initialization Error"
+            self._disable_features() # Disable features on error
+            rumps.notification(
+                "TurboSync Critical Error",
+                "Initialization Failed",
+                f"An error occurred: {str(e)}",
                 sound=True
             )
-            # Synced projects submenu removed
-            self.status_item.title = "Status: Configuration Error" # Keep this line
+
+    def _enable_and_start_features(self):
+        """Enables menu items and starts background services when config is valid."""
+        logging.info("Enabling features and starting services...")
+
+        # Enable menu items
+        self.update_config_item.set_callback(self.update_syncthing_config_task)
+        self.status_dashboard_item.set_callback(self.show_status_panel)
+        self.watch_toggle.set_callback(self.toggle_file_watching)
+
+        # Schedule the config update task
+        schedule.clear() # Clear any previous schedules
+        schedule.every(self.config['sync_interval']).minutes.do(self.scheduled_config_update)
+        self._start_scheduler_thread() # Start scheduler thread if not running
+
+        # Set up file watcher if enabled
+        self.setup_file_watcher() # This handles enabling/disabling based on config
+
+        # Start Syncthing Daemon
+        self._start_syncthing_daemon_and_client()
+
+        # Start status polling (will be handled by _start_syncthing_daemon_and_client if successful)
+
+        # Register cleanup function
+        atexit.register(self.cleanup_syncthing)
+
+        # Trigger initial config update check? Optional, but might be good.
+        self.update_syncthing_config_task()
+        # Trigger initial status poll
+        self._poll_syncthing_status()
+
+
+    def _disable_features(self):
+        """Disables menu items and stops background services when config is invalid/missing."""
+        logging.warning("Disabling features due to missing/invalid configuration.")
+
+        # Disable menu items (except Settings, Logs, Quit)
+        self.update_config_item.set_callback(None)
+        self.status_dashboard_item.set_callback(None)
+        self.watch_toggle.set_callback(None)
+        self.watch_toggle.state = False # Ensure checkbox is off
+
+        # Stop services
+        self._stop_scheduler_thread()
+        schedule.clear()
+        self._stop_file_watcher()
+        self._stop_status_poll_timer()
+        self.cleanup_syncthing() # Stop Syncthing daemon if running
+
+        # Clear API client
+        self.syncthing_api_client = None
+
+    def _start_syncthing_daemon_and_client(self):
+        """Starts the Syncthing daemon and initializes the API client."""
+        if not self.config or not self.config.get('is_valid'):
+            logging.warning("Cannot start Syncthing daemon: Configuration is invalid.")
+            return
+
+        if self.syncthing_process and self.syncthing_process.poll() is None:
+             logging.info("Syncthing daemon already running.")
+             # Ensure API client is initialized if needed
+             if not self.syncthing_api_client:
+                 self._initialize_api_client()
+             return # Already running
+
+        logging.info("Attempting to start Syncthing daemon...")
+        api_addr = self.config.get('syncthing_listen_address', DEFAULT_SYNCTHING_API_ADDRESS)
+
+        self.syncthing_process, error_msg = start_syncthing_daemon(api_address=api_addr)
+
+        if not self.syncthing_process:
+            logging.error(f"Failed to start Syncthing daemon: {error_msg}")
+            rumps.notification("TurboSync Error", "Syncthing Failed", f"Could not start Syncthing: {error_msg}")
+            self.status_item.title = "Status: Syncthing Failed"
+        else:
+            logging.info(f"Syncthing daemon started (PID: {self.syncthing_process.pid}).")
+            # Initialize API Client after successful start
+            self._initialize_api_client()
+
+    def _initialize_api_client(self):
+        """Initializes the Syncthing API client using current config."""
+        if not self.config or not self.config.get('is_valid'):
+            logging.warning("Cannot initialize API client: Configuration invalid.")
+            self.syncthing_api_client = None
+            self._stop_status_poll_timer()
+            return
+
+        api_addr = self.config.get('syncthing_listen_address', DEFAULT_SYNCTHING_API_ADDRESS)
+        api_key = self.config.get('syncthing_api_key')
+
+        if not api_key:
+            logger.info("Attempting to retrieve API key from Syncthing config.xml...")
+            api_key = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR)
+
+        if api_key:
+            try:
+                # Stop existing poll timer before creating new client
+                self._stop_status_poll_timer()
+                self.syncthing_api_client = SyncthingApiClient(api_key=api_key, address=api_addr)
+                logging.info("Syncthing API client initialized successfully.")
+                # Start polling timer only if API client is ready
+                self._start_status_poll_timer()
+            except Exception as api_e:
+                logging.error(f"Failed to initialize Syncthing API client: {api_e}")
+                rumps.notification("TurboSync Error", "Syncthing API Error", f"Could not connect: {api_e}")
+                self.syncthing_api_client = None
+                self._stop_status_poll_timer() # Ensure timer is stopped on error
+        else:
+            logging.error("Syncthing API key not found in config or config.xml. Status polling disabled.")
+            rumps.notification("TurboSync Warning", "Syncthing API Key Missing", "Cannot poll status.")
+            self.syncthing_api_client = None
+            self._stop_status_poll_timer() # Ensure timer is stopped
 
     def create_fallback_icon(self):
         """Creates a simple fallback icon if the main one is missing."""
@@ -295,66 +390,44 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
     @rumps.clicked("Enable File Watching") # Keep decorator
     def toggle_file_watching(self, sender):
-        """Toggle file watching on/off"""
-        # IMPORTANT: Now 'sender' will be the self.watch_toggle MenuItem object
-        logging.debug(f"Toggle file watching: current state is {self.watch_toggle.state}") # Use self.watch_toggle
-        # Use self.watch_toggle for state checks and updates
-        if self.watch_toggle.state:  # Currently enabled, disable it
-            logging.info("Disabling file watching")
-            self.watch_toggle.state = False # Update the correct item's state
-            self.watch_enabled = False
+        """Toggle file watching on/off via the menu item."""
+        # This action should save the setting and then re-run setup_file_watcher
+        current_state = sender.state # State before the click
+        new_state_bool = not current_state
+        new_state_str = 'true' if new_state_bool else 'false'
+        logging.info(f"Toggling file watching via menu. New desired state: {new_state_bool}")
 
-            if self.file_watcher:
-                 # Indented block for the correct if statement above
-                 logging.debug("Stopping file watcher")
-                 self.file_watcher.stop()
-                 self.file_watcher = None
-            # The rest of the logic for disabling continues below
-
-            rumps.notification( # Reverted to rumps.notification
-                "TurboSync",
-                "File Watching Disabled",
-                "Will no longer sync on file changes",
-                sound=False
-            )
-        else:  # Currently disabled, enable it
+        # Check dependencies/config before enabling
+        if new_state_bool: # Trying to enable
             if not is_fswatch_available():
-                logging.warning("Cannot enable file watching, fswatch not available")
-                rumps.notification( # Reverted to rumps.notification
-                    "TurboSync",
-                    "fswatch Not Found",
-                    "Please install fswatch: brew install fswatch",
-                    sound=True
-                )
+                logging.warning("Cannot enable file watching, fswatch not available.")
+                rumps.notification("TurboSync", "fswatch Not Found", "Install fswatch: brew install fswatch", sound=True)
+                sender.state = False # Keep it off
+                return
+            # Check if config is valid and local_dir is set
+            if not self.config or not self.config.get('is_valid') or not self.config.get('local_dir'):
+                logging.warning("Cannot enable file watching, configuration invalid or LOCAL_DIR not set.")
+                rumps.notification("TurboSync", "Configuration Required", "Set Local Directory in Settings and ensure config is valid to enable watching.", sound=True)
+                sender.state = False # Keep it off
                 return
 
-            # Enable file watching
-            logging.info("Enabling file watching")
-            self.watch_toggle.state = True # Update the correct item's state
-            self.watch_enabled = True
-
-            fswatch_config = get_fswatch_config()
-            logging.debug(f"Creating file watcher for {fswatch_config['local_dir']}")
-            self.file_watcher = FileWatcher(
-                fswatch_config['local_dir'],
-                self.on_files_changed,
-                fswatch_config['watch_delay']
-            )
-
-            if self.file_watcher.start():
-                logging.info("File watcher started successfully")
-                rumps.notification( # Reverted to rumps.notification
-                    "TurboSync",
-                    "File Watching Enabled",
-                    f"Now watching {fswatch_config['local_dir']} for changes",
-                    sound=False
-                )
-            else:
-                logging.error("Failed to start file watcher")
-                self.watch_toggle.state = False # Update the correct item's state
-                self.watch_enabled = False
-
-        # self.perform_sync_task() # Removed
+        # Save the new setting
+        # Use the internal save function to only update this key
+        if self._save_settings_internal({'WATCH_LOCAL_FILES': new_state_str}):
+            logging.info(f"Successfully saved WATCH_LOCAL_FILES={new_state_str}")
+            # Reload config to ensure internal state is consistent
+            # Note: _save_settings_internal doesn't reload, but the main _save_settings does.
+            # For consistency, let's reload here after the internal save.
+            self.config = load_config(dotenv_path=USER_ENV_PATH)
+            # Re-run the setup function which will start/stop the watcher based on the new config
+            self.setup_file_watcher()
+            # Notify user
+            rumps.notification("TurboSync", f"File Watching {'Enabled' if new_state_bool else 'Disabled'}", "", sound=False)
+        else:
+            logging.error("Failed to save file watching setting change.")
+            # Revert the menu item state if save failed
+            sender.state = current_state
+            rumps.notification("TurboSync Error", "Save Failed", "Could not update file watching setting.", sound=True)
 
     # --- New task for updating Syncthing configuration ---
     # No decorator needed here if only called internally or via the MenuItem defined above
