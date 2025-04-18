@@ -278,7 +278,10 @@ class SyncthingApiClient:
              else:
                   self.base_url = address # Already includes /rest
 
-        self.headers = {'Authorization': f'Bearer {self.api_key}'} # Use Authorization: Bearer header
+        self.headers = {
+            'Authorization': f'Bearer {self.api_key}', # Use Authorization: Bearer header
+            'X-Requested-With': 'TurboSync' # Add header to potentially bypass CSRF checks
+        }
         logger.info(f"Syncthing API Client initialized for base URL: {self.base_url}")
         # Test connection on init? Maybe not, do it lazily.
 
