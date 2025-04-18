@@ -181,35 +181,78 @@ def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, lo
     # If issues arise, add the --api flag.
 
     logger.info(f"Starting Syncthing daemon ({instance_id}) with command: {' '.join(cmd)}")
+    process = None # Initialize process to None
     try:
         # Start the process without waiting for it.
-        # Redirect stdout/stderr to DEVNULL if not needed, or capture if debugging is required.
-        # Use DETACHED_PROCESS on Windows, start_new_session on Unix-like to prevent it
-        # being killed when the parent (TurboSync) exits unexpectedly.
         creationflags = 0
         start_new_session = False
         if platform.system() == "Windows":
-            # DETACHED_PROCESS makes it a completely separate process
             creationflags = subprocess.DETACHED_PROCESS
         else: # macOS/Linux
-            # start_new_session makes it the leader of a new process group
             start_new_session = True
 
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL, # Keep stdout ignored for now
-            stderr=subprocess.PIPE, # <-- CHANGE THIS LINE from subprocess.DEVNULL
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE, # Capture stderr
             creationflags=creationflags,
             start_new_session=start_new_session,
-            text=True # Add text=True to decode stderr automatically
+            text=True
         )
-        logger.info(f"Syncthing daemon started successfully (PID: {process.pid}).")
-        # Give it a moment to start up before trying to connect
-        time.sleep(2)
-        return process, None # Return the process object and no error
+        logger.info(f"Syncthing daemon ({instance_id}) process created (PID: {process.pid}). Verifying startup...")
+
+        # --- Verification Loop ---
+        max_retries = 5
+        retry_delay = 1.0 # seconds
+        health_checked = False
+        for attempt in range(max_retries):
+            time.sleep(retry_delay)
+            exit_code = process.poll()
+            if exit_code is not None:
+                # Process exited prematurely
+                stderr_output = "Could not read stderr."
+                try:
+                    stderr_output = process.stderr.read()
+                except Exception as e:
+                    logger.error(f"Error reading stderr from failed {instance_id} process: {e}")
+                error_msg = f"Syncthing daemon ({instance_id}, PID: {process.pid}) exited prematurely with code {exit_code}. Stderr: {stderr_output}"
+                logger.error(error_msg)
+                return None, error_msg # Return failure
+
+            # Process still running, attempt health check
+            # Use a temporary client instance for the health check, no API key needed
+            # We use the GUI address because that's what Syncthing listens on for API/GUI
+            temp_client = SyncthingApiClient(api_key="dummy_key_not_used", address=gui_address)
+            if temp_client.check_health():
+                 logger.info(f"Syncthing daemon ({instance_id}, PID: {process.pid}) started successfully and passed health check.")
+                 health_checked = True
+                 break # Exit loop on success
+            else:
+                 logger.debug(f"Health check attempt {attempt + 1}/{max_retries} failed for {instance_id} at {gui_address}. Retrying...")
+        # --- End Verification Loop ---
+
+        if not health_checked:
+            # Loop finished without successful health check
+            stderr_output = "Could not read stderr."
+            try:
+                 stderr_output = process.stderr.read()
+            except Exception as e:
+                 logger.error(f"Error reading stderr from potentially failed {instance_id} process: {e}")
+            error_msg = f"Syncthing daemon ({instance_id}, PID: {process.pid}) failed to pass health check after {max_retries} attempts. Stderr: {stderr_output}"
+            logger.error(error_msg)
+            # Terminate the potentially lingering process
+            stop_syncthing_daemon(process)
+            return None, error_msg # Return failure
+
+        # If health check passed
+        return process, None # Return the running process object and no error
+
     except Exception as e:
-        logger.exception(f"Failed to start Syncthing daemon: {e}")
-        return None, f"Failed to start Syncthing: {e}"
+        logger.exception(f"Failed to start or verify Syncthing daemon ({instance_id}): {e}")
+        # Ensure process is cleaned up if Popen succeeded but verification failed
+        if process and process.poll() is None:
+             stop_syncthing_daemon(process)
+        return None, f"Failed to start/verify Syncthing ({instance_id}): {e}"
 
 def stop_syncthing_daemon(process):
     """Stops the Syncthing daemon process."""
@@ -414,6 +457,25 @@ class SyncthingApiClient:
             "error": error_msg, # Show first error message
             "raw": status_data # Include raw data if needed
         }
+
+    def check_health(self):
+        """Checks the /rest/noauth/health endpoint (does not require API key)."""
+        # Construct URL without /rest, as health check is relative to base address
+        health_url = self.base_url.replace('/rest', '') + '/noauth/health'
+        logger.debug(f"Performing health check on: {health_url}")
+        try:
+            # Make request without API key header and shorter timeout
+            response = requests.get(health_url, timeout=2)
+            response.raise_for_status() # Check for HTTP errors
+            logger.debug(f"Health check successful (Status: {response.status_code})")
+            return True # Or return response.json() if needed
+        except requests.exceptions.RequestException as e:
+            logger.debug(f"Health check failed: {e}")
+            return False
+        except Exception as e: # Catch other potential errors
+            logger.error(f"Unexpected error during health check: {e}")
+            return False
+
     # Add more static helpers as needed: add_device_to_config, share_folder_in_config, remove_folder_from_config
 
 def get_api_key_from_config(config_dir, retries=15, delay=0.5): # Increased retries
