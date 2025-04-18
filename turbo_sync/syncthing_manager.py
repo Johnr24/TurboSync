@@ -143,10 +143,202 @@ def is_syncthing_running(process):
         return True
     return False
 
-# --- Placeholder for API Client ---
-# class SyncthingApiClient:
-#     def __init__(self, api_key, address="127.0.0.1:8385"):
-#         self.api_key = api_key
-#         self.base_url = f"http://{address}/rest"
-#         self.headers = {'X-API-Key': self.api_key}
-#         # TODO: Add methods for API interaction using requests library
+import requests # Import requests library
+
+# --- Syncthing API Client ---
+class SyncthingApiClient:
+    def __init__(self, api_key, address=DEFAULT_SYNCTHING_API_ADDRESS):
+        if not api_key:
+             raise ValueError("API key is required for SyncthingApiClient")
+        self.api_key = api_key
+        # Ensure address includes protocol
+        if not address.startswith(('http://', 'https://')):
+             # Default to http if not specified, consider https if needed
+             self.base_url = f"http://{address}/rest"
+             logger.warning(f"API address '{address}' missing protocol, assuming http.")
+        else:
+             # Ensure it ends with /rest
+             if not address.endswith('/rest'):
+                  # Remove trailing slash if present before adding /rest
+                  self.base_url = address.rstrip('/') + "/rest"
+             else:
+                  self.base_url = address # Already includes /rest
+
+        self.headers = {'X-API-Key': self.api_key}
+        logger.info(f"Syncthing API Client initialized for base URL: {self.base_url}")
+        # Test connection on init? Maybe not, do it lazily.
+
+    def _request(self, method, endpoint, params=None, json=None):
+        """Internal helper to make API requests."""
+        url = self.base_url + endpoint
+        try:
+            response = requests.request(
+                method,
+                url,
+                headers=self.headers,
+                params=params,
+                json=json,
+                timeout=10 # Add a timeout
+            )
+            response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+            # Handle empty response body for non-GET requests or specific endpoints
+            if response.status_code == 204 or not response.content:
+                 return {} # Return empty dict for no content
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Syncthing API request failed ({method} {url}): {e}")
+            return None # Indicate failure
+
+    def get_config(self):
+        """Get the current Syncthing configuration."""
+        return self._request('GET', '/config')
+
+    def update_config(self, config_data):
+        """Update the Syncthing configuration."""
+        # Note: This replaces the entire config. Use with caution.
+        # Consider using specific endpoints for adding/removing devices/folders if needed.
+        logger.warning("Attempting to update entire Syncthing config.")
+        return self._request('POST', '/config', json=config_data)
+
+    def get_folder_status(self, folder_id):
+        """Get status for a specific folder."""
+        return self._request('GET', '/db/status', params={'folder': folder_id})
+
+    def get_all_folder_statuses(self):
+        """Get status for all configured folders by iterating."""
+        # Note: There isn't a single endpoint for all folder statuses.
+        # We need to get the config first, then query each folder.
+        config = self.get_config()
+        if not config or 'folders' not in config:
+            logger.warning("Could not get config or no folders found to fetch status.")
+            return {} # Return empty dict if config fails or no folders
+        statuses = {}
+        for f in config['folders']:
+            folder_id = f.get('id')
+            if folder_id:
+                 status = self.get_folder_status(folder_id)
+                 if status is not None: # Only add if request was successful
+                     # Add the folder label to the status for easier use in UI
+                     status['label'] = f.get('label', folder_id)
+                     statuses[folder_id] = status
+                 else:
+                     logger.warning(f"Failed to get status for folder: {folder_id}")
+            else:
+                 logger.warning(f"Folder found in config without an ID: {f}")
+        # Return only statuses where the request succeeded
+        return statuses
+
+
+    def restart_syncthing(self):
+        """Trigger a restart of the Syncthing daemon."""
+        logger.info("Requesting Syncthing daemon restart via API...")
+        response_data = self._request('POST', '/system/restart')
+        if response_data is not None: # Check if request itself succeeded
+             logger.info("Syncthing restart request sent successfully.")
+             return True
+        else:
+             logger.error("Failed to send Syncthing restart request.")
+             return False
+
+    def get_connections(self):
+        """Get information about current connections."""
+        return self._request('GET', '/system/connections')
+
+    # --- Helper methods for modifying config structure (use before calling update_config) ---
+
+    @staticmethod
+    def add_folder_to_config(config_data, folder_id, local_path, devices=None):
+        """Adds a folder definition to a config dictionary (does not apply it)."""
+        if devices is None:
+            devices = [] # Default to empty list if no devices specified
+        if 'folders' not in config_data:
+            config_data['folders'] = []
+
+        # Check if folder already exists
+        for i, folder in enumerate(config_data['folders']):
+            if folder.get('id') == folder_id:
+                logger.warning(f"Folder '{folder_id}' already exists in config. Updating path and devices.")
+                config_data['folders'][i]['path'] = local_path
+                config_data['folders'][i]['devices'] = [{'deviceID': dev_id} for dev_id in devices]
+                return # Exit after updating
+
+        # Add new folder if not found
+        config_data['folders'].append({
+            "id": folder_id,
+            "label": os.path.basename(local_path) or folder_id, # Use basename as label
+            "path": local_path,
+            "type": "sendreceive", # Default type
+            "devices": [{'deviceID': dev_id} for dev_id in devices],
+            "rescanIntervalS": 3600, # Default rescan interval
+            "fsWatcherEnabled": True, # Enable watcher if available
+            # Add other necessary default folder settings here
+        })
+        logger.info(f"Prepared folder '{folder_id}' ({local_path}) for addition to config.")
+
+    @staticmethod
+    def parse_folder_status(status_data):
+        """Parses the raw folder status dict into a more usable format."""
+        if not status_data:
+            return {"state": "unknown", "error": "No status data", "completion": 0}
+
+        state = status_data.get('state', 'unknown')
+        # Check for pull errors specifically
+        pull_errors = status_data.get('pullErrors', [])
+        error_msg = None
+        if pull_errors and len(pull_errors) > 0:
+             # Combine first few error messages if multiple exist
+             error_msg = "; ".join([e.get('error', 'Unknown pull error') for e in pull_errors[:3]])
+             # If state is idle but there are errors, reflect that
+             if state == 'idle':
+                 state = 'error' # Override state to 'error' if idle but has pull errors
+
+        global_bytes = status_data.get('globalBytes', 0)
+        local_bytes = status_data.get('localBytes', 0)
+        completion = 0
+        if global_bytes > 0:
+            # Ensure completion doesn't exceed 100% due to potential inconsistencies
+            completion = min((local_bytes / global_bytes) * 100, 100.0)
+
+
+        return {
+            "state": state, # e.g., "idle", "scanning", "syncing", "error"
+            "completion": completion,
+            "error": error_msg, # Show first error message
+            "raw": status_data # Include raw data if needed
+        }
+    # Add more static helpers as needed: add_device_to_config, share_folder_in_config, remove_folder_from_config
+
+def get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR):
+    """Reads the API key directly from Syncthing's config.xml."""
+    config_path = os.path.join(config_dir, 'config.xml')
+    logger.debug(f"Attempting to read API key from: {config_path}")
+    if not os.path.exists(config_path):
+        logger.warning(f"Syncthing config file not found at {config_path}")
+        return None
+
+    try:
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(config_path)
+        root = tree.getroot()
+        # Find the gui element and then the apikey element within it
+        gui_element = root.find('./gui')
+        if gui_element is not None:
+            api_key_element = gui_element.find('./apikey')
+            if api_key_element is not None and api_key_element.text:
+                api_key = api_key_element.text.strip()
+                logger.info("Successfully retrieved API key from config.xml")
+                return api_key
+            else:
+                logger.warning("API key element not found or empty in config.xml")
+        else:
+            logger.warning("GUI element not found in config.xml")
+        return None
+    except ImportError:
+        logger.error("xml.etree.ElementTree not available. Cannot parse config.xml for API key.")
+        return None
+    except ET.ParseError as e:
+        logger.error(f"Error parsing Syncthing config.xml: {e}")
+        return None
+    except Exception as e:
+        logger.exception(f"Unexpected error reading API key from config.xml: {e}")
+        return None
