@@ -347,10 +347,12 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
     def _initialize_api_clients(self):
         """Initializes the Syncthing API clients for both instances, only if the corresponding daemon process is running."""
+        # Reset clients first
+        self.api_client_source = None
+        self.api_client_dest = None
+
         if not self.config or not self.config.get('is_valid'):
             logging.warning("Cannot initialize API clients: Configuration invalid.")
-            self.api_client_source = None
-            self.api_client_dest = None
             self._stop_status_poll_timer()
             return
 
