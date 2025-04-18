@@ -368,7 +368,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                     self.api_client_source = SyncthingApiClient(api_key=api_key_source, address=gui_addr_source) # <-- Reverted to use gui_addr_source
                     logging.info(f"Source Syncthing API client initialized (using GUI address: {gui_addr_source}). Pinging...") # <-- Reverted log message
                     # --- Add Delay ---
-                    time.sleep(2) # Give Syncthing a moment to activate the key (Increased slightly)
+                    time.sleep(5) # Give Syncthing more time to activate the key and API listener
                     # --- End Delay ---
                     # --- Add Ping Check ---
                     if self.api_client_source.ping():
@@ -406,7 +406,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                     self.api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=gui_addr_dest) # <-- Reverted to use gui_addr_dest
                     logging.info(f"Destination Syncthing API client initialized (using GUI address: {gui_addr_dest}). Pinging...") # <-- Reverted log message
                     # --- Add Delay ---
-                    time.sleep(2) # Give Syncthing a moment to activate the key (Increased slightly)
+                    time.sleep(5) # Give Syncthing more time to activate the key and API listener
                     # --- End Delay ---
                     # --- Add Ping Check ---
                     if self.api_client_dest.ping():
