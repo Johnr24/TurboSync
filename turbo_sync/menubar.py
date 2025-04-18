@@ -366,11 +366,16 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             if api_key_source and gui_addr_source: # <-- Reverted to check gui_addr_source
                 try:
                     self.api_client_source = SyncthingApiClient(api_key=api_key_source, address=gui_addr_source) # <-- Reverted to use gui_addr_source
-                    logging.info(f"Source Syncthing API client initialized (using GUI address: {gui_addr_source}).") # <-- Removed "Pinging..." from log
-                    # --- REMOVED Immediate Ping Check ---
-                    # The ping() call and its associated logic (including setting client to None on failure)
-                    # have been completely removed from this initialization block.
-                    # We will rely on later API calls to verify connectivity.
+                    logging.info(f"Source Syncthing API client initialized (using GUI address: {gui_addr_source}). Pinging...") # <-- Restore "Pinging..."
+                    # --- Restore Immediate Ping Check ---
+                    time.sleep(2) # Add short delay before ping
+                    if self.api_client_source.ping(): # Restore ping check
+                        logging.info("Source API ping successful.")
+                    else:
+                        logging.error("Source API ping FAILED. Check API key and Syncthing instance.")
+                        rumps.notification("TurboSync Error", "Source API Ping Failed", "Could not verify connection to source Syncthing.")
+                        self.api_client_source = None # Invalidate client if ping fails
+                    # --- End Restore Ping Check ---
                 except Exception as api_e:
                     logging.error(f"Failed to initialize Source Syncthing API client: {api_e}") # Removed "or ping"
                     rumps.notification("TurboSync Error", "Source API Error", f"Could not connect: {api_e}") # Removed "/ping"
@@ -397,11 +402,16 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             if api_key_dest and gui_addr_dest: # <-- Reverted to check gui_addr_dest
                 try:
                     self.api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=gui_addr_dest) # <-- Reverted to use gui_addr_dest
-                    logging.info(f"Destination Syncthing API client initialized (using GUI address: {gui_addr_dest}).") # <-- Removed "Pinging..." from log
-                    # --- REMOVED Immediate Ping Check ---
-                    # The ping() call and its associated logic (including setting client to None on failure)
-                    # have been completely removed from this initialization block.
-                    # We will rely on later API calls to verify connectivity.
+                    logging.info(f"Destination Syncthing API client initialized (using GUI address: {gui_addr_dest}). Pinging...") # <-- Restore "Pinging..."
+                    # --- Restore Immediate Ping Check ---
+                    time.sleep(2) # Add short delay before ping
+                    if self.api_client_dest.ping(): # Restore ping check
+                        logging.info("Destination API ping successful.")
+                    else:
+                        logging.error("Destination API ping FAILED. Check API key and Syncthing instance.")
+                        rumps.notification("TurboSync Error", "Dest API Ping Failed", "Could not verify connection to destination Syncthing.")
+                        self.api_client_dest = None # Invalidate client if ping fails
+                    # --- End Restore Ping Check ---
                 except Exception as api_e:
                     logging.error(f"Failed to initialize Destination Syncthing API client: {api_e}") # Removed "or ping"
                     rumps.notification("TurboSync Error", "Dest API Error", f"Could not connect: {api_e}") # Removed "/ping"

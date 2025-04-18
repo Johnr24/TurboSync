@@ -280,11 +280,8 @@ class SyncthingApiClient:
        self.origin = f"{protocol}://{host_address}" # e.g., http://127.0.0.1:28387
        self.base_url = f"{self.origin}/rest" # Construct base URL for API calls
 
-       self.headers = {
-           'Authorization': f'Bearer {self.api_key}', # Use Authorization: Bearer header
-           'X-Requested-With': 'TurboSync', # Standard header for AJAX/API requests
-           'Origin': self.origin # Add the Origin header matching the GUI host
-       }
+       # Use ONLY the Authorization header, matching the successful curl command
+       self.headers = {'Authorization': f'Bearer {self.api_key}'}
        logger.info(f"Syncthing API Client initialized for base URL: {self.base_url}")
        # Test connection on init? Maybe not, do it lazily.
 
@@ -370,7 +367,7 @@ class SyncthingApiClient:
     def ping(self):
         """Pings the Syncthing API to check connectivity and authentication."""
         logger.debug(f"Pinging Syncthing API at {self.base_url}/system/ping")
-        response = self._request('GET', '/system/ping')
+        response = self._request('POST', '/system/ping') # Use POST method matching successful curl
         if response is not None and isinstance(response, dict) and response.get('ping') == 'pong':
             logger.info(f"Syncthing API ping successful for {self.base_url}")
             return True
