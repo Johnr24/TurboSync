@@ -32,9 +32,10 @@ from PySide6.QtWidgets import QApplication # Keep QApplication
 from PySide6.QtCore import QObject, Signal # Add QObject, Signal
 # --- Import Syncthing Manager ---
 from turbo_sync.syncthing_manager import (
-    start_syncthing_daemon, stop_syncthing_daemon, is_syncthing_running)
+    start_syncthing_daemon, stop_syncthing_daemon, is_syncthing_running,
+    SyncthingApiClient, get_api_key_from_config, SYNCTHING_CONFIG_DIR, DEFAULT_SYNCTHING_API_ADDRESS) # Added imports
 from turbo_sync.status_panel import StatusPanel
-
+ 
 # Set up module-level logger
 logger = logging.getLogger(__name__)
 
