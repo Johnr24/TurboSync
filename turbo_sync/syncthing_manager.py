@@ -262,28 +262,31 @@ import requests # Import requests library
 # --- Syncthing API Client ---
 class SyncthingApiClient:
     def __init__(self, api_key, address):
-        if not api_key:
-             raise ValueError("API key is required for SyncthingApiClient")
-        self.api_key = api_key
-        # Ensure address includes protocol
-        if not address.startswith(('http://', 'https://')):
-             # Default to http if not specified, consider https if needed
-             self.base_url = f"http://{address}/rest"
-             logger.warning(f"API address '{address}' missing protocol, assuming http.")
-        else:
-             # Ensure it ends with /rest
-             if not address.endswith('/rest'):
-                  # Remove trailing slash if present before adding /rest
-                  self.base_url = address.rstrip('/') + "/rest"
-             else:
-                  self.base_url = address # Already includes /rest
+       if not api_key:
+            raise ValueError("API key is required for SyncthingApiClient")
+       self.api_key = api_key
 
-        self.headers = {
-            'Authorization': f'Bearer {self.api_key}', # Use Authorization: Bearer header
-            'X-Requested-With': 'TurboSync' # Add header to potentially bypass CSRF checks
-        }
-        logger.info(f"Syncthing API Client initialized for base URL: {self.base_url}")
-        # Test connection on init? Maybe not, do it lazily.
+       # Determine Origin and Base URL from address
+       if not address.startswith(('http://', 'https://')):
+            protocol = "http" # Default protocol
+            logger.warning(f"API address '{address}' missing protocol, assuming http.")
+            host_address = address # Address is just host:port
+       else:
+            # Split protocol from the rest
+            protocol, rest = address.split('://', 1)
+            # Get only the host:port part, discard any path like /rest if present
+            host_address = rest.split('/', 1)[0]
+
+       self.origin = f"{protocol}://{host_address}" # e.g., http://127.0.0.1:28387
+       self.base_url = f"{self.origin}/rest" # Construct base URL for API calls
+
+       self.headers = {
+           'Authorization': f'Bearer {self.api_key}', # Use Authorization: Bearer header
+           'X-Requested-With': 'TurboSync', # Standard header for AJAX/API requests
+           'Origin': self.origin # Add the Origin header matching the GUI host
+       }
+       logger.info(f"Syncthing API Client initialized for base URL: {self.base_url}")
+       # Test connection on init? Maybe not, do it lazily.
 
     def _request(self, method, endpoint, params=None, json=None):
         """Internal helper to make API requests."""
