@@ -814,6 +814,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
 # --- Update TurboSyncMenuBar ---
         new_api_addr = new_settings.get('SYNCTHING_LISTEN_ADDRESS', DEFAULT_SYNCTHING_API_ADDRESS)
+        # Get the old API address from the current config
+        old_api_addr = self.config.get('syncthing_listen_address', DEFAULT_SYNCTHING_API_ADDRESS) if self.config else DEFAULT_SYNCTHING_API_ADDRESS
         # Add checks for other critical daemon settings if they become configurable (e.g., protocol port)
 
         # Restart if API address changed OR if the process isn't running but should be
