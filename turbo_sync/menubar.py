@@ -230,7 +230,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.api_client_dest = None
 
     def _start_syncthing_daemons_and_clients(self):
-        """Generates initial configs, starts the TWO Syncthing daemons, checks if they exited quickly,
+        """Generates initial configs, starts the TWO Syncthing daemons, verifies startup,
            and initializes their API clients if they are running."""
         if not self.config or not self.config.get('is_valid'):
             logging.warning("Cannot start Syncthing daemons: Configuration is invalid.")
@@ -248,45 +248,31 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             logging.info("Syncthing source daemon already running.")
         else:
             logging.info("Preparing to start Syncthing source daemon...")
-            api_addr_source = self.config.get('syncthing_api_address_source')
+            api_addr_source = self.config.get('syncthing_api_address_source') # Still needed for start command? No.
             gui_addr_source = self.config.get('syncthing_gui_address_source')
-            if not api_addr_source or not gui_addr_source:
-                 logging.error("Source Syncthing API or GUI address missing in config.")
-                 self.syncthing_process_source = None # Ensure it's None
+            if not gui_addr_source: # Only need GUI address now
+                 logging.error("Source Syncthing GUI address missing in config.")
+                 self.syncthing_process_source = None
             else:
                 logging.info("Generating initial config for source instance...")
                 if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_SOURCE):
-                    logging.info("Attempting to start Syncthing source daemon...")
-                    process, error_msg = start_syncthing_daemon( # Capture process object
+                    logging.info("Attempting to start and verify Syncthing source daemon...")
+                    # start_syncthing_daemon now handles verification
+                    process, error_msg = start_syncthing_daemon(
                         instance_id="source",
                         config_dir=SYNCTHING_CONFIG_DIR_SOURCE,
-                        api_address=api_addr_source,
+                        api_address=None, # Not used by start command anymore
                         gui_address=gui_addr_source,
                         log_file=SYNCTHING_LOG_FILE_SOURCE
                     )
-                    if not process:
-                        logging.error(f"Failed to start Syncthing source daemon process: {error_msg}")
-                        rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Could not start: {error_msg}")
-                        self.syncthing_process_source = None # Ensure it's None
+                    if process:
+                        logging.info(f"Syncthing source daemon verified successfully (PID: {process.pid}).")
+                        self.syncthing_process_source = process
                     else:
-                        # Check if the process exited quickly after the sleep in start_syncthing_daemon
-                        exit_code = process.poll()
-                        if exit_code is not None:
-                             stderr_output = "Could not read stderr."
-                             try:
-                                 # Read stderr (it's already decoded due to text=True)
-                                 stderr_output = process.stderr.read()
-                             except Exception as e:
-                                 logging.error(f"Error reading stderr from failed source process: {e}")
-
-                             logging.error(f"Syncthing source daemon (PID: {process.pid}) exited immediately with code {exit_code}.")
-                             logging.error(f"Syncthing source stderr:\n---\n{stderr_output}\n---")
-                             rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Exited immediately (code {exit_code}). Check logs.")
-                             self.syncthing_process_source = None # Mark as failed
-                        else:
-                             # Process is still running after the initial sleep
-                             logging.info(f"Syncthing source daemon started successfully (PID: {process.pid}).")
-                             self.syncthing_process_source = process # Store the running process
+                        # start_syncthing_daemon already logged the detailed error
+                        logging.error(f"Failed to start or verify Syncthing source daemon: {error_msg}")
+                        rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Could not start/verify: {error_msg[:100]}...") # Show truncated error
+                        self.syncthing_process_source = None
                 else:
                     logging.error("Failed to generate initial config for source instance. Daemon not started.")
                     rumps.notification("TurboSync Error", "Syncthing Source Config Failed", "Could not generate initial config.")
@@ -297,52 +283,37 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             logging.info("Syncthing destination daemon already running.")
         else:
             logging.info("Preparing to start Syncthing destination daemon...")
-            api_addr_dest = self.config.get('syncthing_api_address_dest')
+            api_addr_dest = self.config.get('syncthing_api_address_dest') # Not used by start command
             gui_addr_dest = self.config.get('syncthing_gui_address_dest')
-            if not api_addr_dest or not gui_addr_dest:
-                 logging.error("Destination Syncthing API or GUI address missing in config.")
-                 self.syncthing_process_dest = None # Ensure it's None
+            if not gui_addr_dest: # Only need GUI address
+                 logging.error("Destination Syncthing GUI address missing in config.")
+                 self.syncthing_process_dest = None
             else:
                 logging.info("Generating initial config for destination instance...")
                 if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_DEST):
-                    logging.info("Attempting to start Syncthing destination daemon...")
-                    process, error_msg = start_syncthing_daemon( # Capture process object
+                    logging.info("Attempting to start and verify Syncthing destination daemon...")
+                    # start_syncthing_daemon now handles verification
+                    process, error_msg = start_syncthing_daemon(
                         instance_id="dest",
                         config_dir=SYNCTHING_CONFIG_DIR_DEST,
-                        api_address=api_addr_dest,
+                        api_address=None, # Not used by start command anymore
                         gui_address=gui_addr_dest,
                         log_file=SYNCTHING_LOG_FILE_DEST
                     )
-                    if not process:
-                        logging.error(f"Failed to start Syncthing destination daemon process: {error_msg}")
-                        rumps.notification("TurboSync Error", "Syncthing Dest Failed", f"Could not start: {error_msg}")
-                        self.syncthing_process_dest = None # Ensure it's None
+                    if process:
+                        logging.info(f"Syncthing destination daemon verified successfully (PID: {process.pid}).")
+                        self.syncthing_process_dest = process
                     else:
-                        # Check if the process exited quickly after the sleep in start_syncthing_daemon
-                        exit_code = process.poll()
-                        if exit_code is not None:
-                             stderr_output = "Could not read stderr."
-                             try:
-                                 # Read stderr (it's already decoded due to text=True)
-                                 stderr_output = process.stderr.read()
-                             except Exception as e:
-                                 logging.error(f"Error reading stderr from failed dest process: {e}")
-
-                             logging.error(f"Syncthing destination daemon (PID: {process.pid}) exited immediately with code {exit_code}.")
-                             logging.error(f"Syncthing destination stderr:\n---\n{stderr_output}\n---")
-                             rumps.notification("TurboSync Error", "Syncthing Dest Failed", f"Exited immediately (code {exit_code}). Check logs.")
-                             self.syncthing_process_dest = None # Mark as failed
-                        else:
-                             # Process is still running after the initial sleep
-                             logging.info(f"Syncthing destination daemon started successfully (PID: {process.pid}).")
-                             self.syncthing_process_dest = process # Store the running process
+                        # start_syncthing_daemon already logged the detailed error
+                        logging.error(f"Failed to start or verify Syncthing destination daemon: {error_msg}")
+                        rumps.notification("TurboSync Error", "Syncthing Dest Failed", f"Could not start/verify: {error_msg[:100]}...") # Show truncated error
+                        self.syncthing_process_dest = None
                 else:
                     logging.error("Failed to generate initial config for destination instance. Daemon not started.")
                     rumps.notification("TurboSync Error", "Syncthing Dest Config Failed", "Could not generate initial config.")
                     self.syncthing_process_dest = None
 
-        # --- Initialize API Clients (only if daemons are actually running) ---
-        # This is called AFTER attempting to start the daemons and checking they didn't exit immediately.
+        # --- Initialize API Clients (only if daemons were successfully started and verified) ---
         self._initialize_api_clients()
 
     def _initialize_api_clients(self):
