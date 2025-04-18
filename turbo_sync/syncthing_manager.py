@@ -387,31 +387,3 @@ def get_api_key_from_config(config_dir, retries=10, delay=0.5):
 
     logger.error(f"Failed to retrieve API key from {config_path} after {retries} attempts.")
     return None
-
-
-    try:
-        import xml.etree.ElementTree as ET
-        tree = ET.parse(config_path)
-        root = tree.getroot()
-        # Find the gui element and then the apikey element within it
-        gui_element = root.find('./gui')
-        if gui_element is not None:
-            api_key_element = gui_element.find('./apikey')
-            if api_key_element is not None and api_key_element.text:
-                api_key = api_key_element.text.strip()
-                logger.info("Successfully retrieved API key from config.xml")
-                return api_key
-            else:
-                logger.warning("API key element not found or empty in config.xml")
-        else:
-            logger.warning("GUI element not found in config.xml")
-        return None
-    except ImportError:
-        logger.error("xml.etree.ElementTree not available. Cannot parse config.xml for API key.")
-        return None
-    except ET.ParseError as e:
-        logger.error(f"Error parsing Syncthing config.xml: {e}")
-        return None
-    except Exception as e:
-        logger.exception(f"Unexpected error reading API key from config.xml: {e}")
-        return None
