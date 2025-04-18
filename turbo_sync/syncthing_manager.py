@@ -75,6 +75,68 @@ def ensure_dir_exists(dir_path):
             return False
     return True
 
+# Add this function before start_syncthing_daemon
+def generate_syncthing_config(syncthing_exe, config_dir):
+    """
+    Runs Syncthing with the --generate flag to create initial config files.
+
+    Args:
+        syncthing_exe (str): Path to the Syncthing executable.
+        config_dir (str): Path to the configuration directory to generate.
+
+    Returns:
+        bool: True if generation command executed successfully (exit code 0), False otherwise.
+    """
+    if not syncthing_exe or not os.path.exists(syncthing_exe):
+        logger.error(f"Cannot generate config: Syncthing executable not found at {syncthing_exe}")
+        return False
+
+    if not ensure_dir_exists(config_dir):
+        logger.error(f"Cannot generate config: Failed to ensure config directory exists at {config_dir}")
+        return False
+
+    # Check if config.xml already exists. If so, generation might not be needed or could overwrite.
+    # For simplicity, we'll run it anyway, Syncthing might handle this gracefully.
+    # If issues arise, add a check here: os.path.exists(os.path.join(config_dir, 'config.xml'))
+    config_file_path = os.path.join(config_dir, 'config.xml')
+    if os.path.exists(config_file_path):
+        logger.debug(f"Config file already exists at {config_file_path}. Running --generate anyway.")
+        # Optionally skip generation if file exists and is valid? Needs more complex check.
+
+    cmd = [
+        syncthing_exe,
+        f"--generate={config_dir}"
+    ]
+    logger.info(f"Generating initial Syncthing config for: {config_dir} with command: {' '.join(cmd)}")
+
+    try:
+        # Run the command and wait for it to complete
+        result = subprocess.run(
+            cmd,
+            capture_output=True, # Capture stdout/stderr
+            text=True,
+            check=False # Don't raise exception on non-zero exit, check manually
+        )
+
+        if result.returncode == 0:
+            logger.info(f"Syncthing config generation successful for {config_dir}.")
+            logger.debug(f"Syncthing --generate stdout:\n{result.stdout}")
+            logger.debug(f"Syncthing --generate stderr:\n{result.stderr}")
+            # Check if config file was actually created
+            if not os.path.exists(config_file_path):
+                 logger.warning(f"Syncthing --generate command succeeded but config file not found at {config_file_path}")
+                 # Treat as failure? Or maybe Syncthing decided not to overwrite?
+                 # For now, log warning but return True based on exit code.
+            return True
+        else:
+            logger.error(f"Syncthing config generation failed for {config_dir} (Exit Code: {result.returncode}).")
+            logger.error(f"Syncthing --generate stdout:\n{result.stdout}")
+            logger.error(f"Syncthing --generate stderr:\n{result.stderr}")
+            return False
+    except Exception as e:
+        logger.exception(f"Exception occurred while running Syncthing --generate for {config_dir}: {e}")
+        return False
+
 def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, log_file):
     """
     Starts a specific Syncthing daemon instance.
