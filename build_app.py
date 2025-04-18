@@ -321,7 +321,7 @@ app = BUNDLE(
         if os.path.exists(syncthing_bundled_path):
             subprocess.run(["chmod", "+x", syncthing_bundled_path], check=True)
             print(f"  - Set +x for {os.path.basename(syncthing_path)}")
-       else:
+        else:
             print(f"  - Warning: Bundled syncthing not found at {syncthing_bundled_path}")
     except Exception as e:
         print(f"Warning: Failed to set execute permissions for bundled binaries: {e}")
