@@ -98,11 +98,11 @@ def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, lo
         f"--home={config_dir}",
         "--no-browser",
         f"--gui-address={gui_address}", # Use separate GUI address
-        # Note: Syncthing >= 1.19 might use --api instead of relying on gui-address for API
-        # f"--api={api_address}", # Add if targeting Syncthing >= 1.19
+        f"--listen={api_address}",      # Explicitly set API listen address
         f"--logfile={log_file}",
         "--log-max-old-files=3"
     ]
+    # Note: --listen sets the API address. --gui-address sets the GUI address.
     # If using Syncthing < 1.19, the API might listen on the gui-address.
     # If using Syncthing >= 1.19, explicitly setting --api is preferred.
     # For broader compatibility, we might rely on gui-address for API initially,
