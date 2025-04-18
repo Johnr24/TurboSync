@@ -342,7 +342,7 @@ class SyncthingApiClient:
         }
     # Add more static helpers as needed: add_device_to_config, share_folder_in_config, remove_folder_from_config
 
-def get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR):
+def get_api_key_from_config(config_dir):
     """Reads the API key directly from Syncthing's config.xml."""
     config_path = os.path.join(config_dir, 'config.xml')
     logger.debug(f"Attempting to read API key from: {config_path}")
