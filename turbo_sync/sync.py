@@ -424,31 +424,27 @@ def update_syncthing_configuration(api_client_source: SyncthingApiClient, api_cl
 
 
         # 8. Apply Configuration Changes (if any)
-        # --- TEMPORARILY DISABLED CONFIG UPDATE TO DEBUG CRASH ---
-        logger.warning("Skipping actual Syncthing config update via API for debugging.")
-        # if config_updated:
-        #     logger.info("Applying updated configuration to Syncthing instances via API...")
-        #     # Apply updates to BOTH instances using the provided clients
-        #     success_source = api_client_source.update_config(new_config_source)
-        #     success_dest = api_client_dest.update_config(new_config_dest)
-        #
-        #     if success_source is None or success_dest is None: # Check for API request failure on either
-        #          message = "Error: Failed to apply updated Syncthing configuration via API to one or both instances."
-        #          logger.error(message)
-        #          error_occurred = True
-        #     else:
-        #          # Use the variables calculated for the source instance (should be same count for dest)
-        #          message = f"Syncthing configuration updated successfully. Added: {len(folders_to_add_source)}, Removed: {len(folders_to_remove_source)}."
-        #          logger.info(message)
-        #          # Optional: Trigger a restart if needed, though Syncthing often reloads config automatically
-        #          # api_client.restart_syncthing()
-        # else:
-        if config_updated: # Still set message based on whether changes *would* have been applied
-            message = f"Config update needed (Skipped Apply): Added: {len(folders_to_add_source)}, Removed: {len(folders_to_remove_source)}."
+        # --- RE-ENABLED CONFIG UPDATE ---
+        if config_updated:
+            logger.info("Applying updated configuration to Syncthing instances via API...")
+            # Apply updates to BOTH instances using the provided clients
+            success_source = api_client_source.update_config(new_config_source)
+            success_dest = api_client_dest.update_config(new_config_dest)
+
+            if success_source is None or success_dest is None: # Check for API request failure on either
+                 message = "Error: Failed to apply updated Syncthing configuration via API to one or both instances."
+                 logger.error(message)
+                 error_occurred = True
+            else:
+                 # Use the variables calculated for the source instance (should be same count for dest)
+                 message = f"Syncthing configuration updated successfully. Added: {len(folders_to_add_source)}, Removed: {len(folders_to_remove_source)}."
+                 logger.info(message)
+                 # Optional: Trigger a restart if needed, though Syncthing often reloads config automatically
+                 # api_client.restart_syncthing()
         else:
             message = "No Syncthing configuration changes needed."
             logger.info(message)
-        # --- END TEMPORARY DISABLE ---
+        # --- END RE-ENABLE ---
 
     except ValueError as e: # Catch config loading errors or API key issues
         logger.error(f"Configuration error during Syncthing update: {str(e)}")
