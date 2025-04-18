@@ -22,12 +22,17 @@ from turbo_sync.sync import perform_sync, load_config, find_livework_dirs # Abso
 from turbo_sync.watcher import FileWatcher, is_fswatch_available, get_fswatch_config # Absolute import
 # import multiprocessing # Import multiprocessing for Queue and Manager # Removed
 import textwrap # For formatting long messages
+import atexit # Import atexit for cleanup
+
 from turbo_sync.utils import get_resource_path # Import from utils
 # --- Import the Settings Dialog logic ---
 from turbo_sync.settings_dialog import launch_pyside_settings_dialog # Import the launcher function
 # --- Imports needed for Status Panel ---
 from PySide6.QtWidgets import QApplication # Keep QApplication
 from PySide6.QtCore import QObject, Signal # Add QObject, Signal
+# --- Import Syncthing Manager ---
+from turbo_sync.syncthing_manager import (
+    start_syncthing_daemon, stop_syncthing_daemon, is_syncthing_running)
 from turbo_sync.status_panel import StatusPanel
 
 # Set up module-level logger
@@ -82,6 +87,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.last_sync_status = "Never synced"
         self.file_watcher = None
         self.watch_enabled = False # Will be updated by setup_file_watcher
+        self.syncthing_process = None # Add state for Syncthing process
         self.last_sync_results = {} # Store detailed results {path: {'success': bool, 'synced_files': [], 'error': 'msg', 'error_type': 'optional_str'}}
         # self.active_sync_progress = {} # Store current progress {path: percentage} # Removed
         # Use Manager().Queue() for inter-process communication with ProcessPoolExecutor

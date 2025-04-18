@@ -2,10 +2,14 @@ import logging
 import sys
 from collections import OrderedDict
 
+import logging
+import sys
+from collections import OrderedDict
+
 # --- PySide6 Imports ---
 # Keep these imports specific to this file
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QVBoxLayout, QFormLayout, QLabel, QLineEdit,
+    QApplication, QDialog, QVBoxLayout, QFormLayout, QLabel, QLineEdit, QToolTip, # Added QToolTip
     QCheckBox, QPushButton, QDialogButtonBox, QGroupBox, QSpinBox, QPlainTextEdit,
     QHBoxLayout, QFileDialog  # Added QHBoxLayout and QFileDialog
 )
@@ -129,6 +133,11 @@ QPushButton:pressed {
             ("Remote Server", {
                 "REMOTE_USER": ("Remote Username:", QLineEdit, ""),
                 "REMOTE_HOST": ("Remote Host:", QLineEdit, ""),
+                # --- Syncthing Specific ---
+                "REMOTE_SYNCTHING_DEVICE_ID": ("Remote Syncthing Device ID:", QLineEdit, ""),
+                # --- End Syncthing Specific ---
+
+                # --- SSH Specific (Keep for now, maybe hide/show later) ---
                 "REMOTE_PORT": ("Remote Port:", QLineEdit, "22"), # Keep as QLineEdit for now
             }),
             ("Local Settings", {
@@ -143,10 +152,16 @@ QPushButton:pressed {
                 "ENABLE_PARALLEL_SYNC": ("Enable Parallel Sync:", QCheckBox, True),
                 "PARALLEL_PROCESSES": ("Parallel Processes:", QSpinBox, 4), # Use QSpinBox
             }),
+            ("Syncthing Daemon", { # New Group Box for Local Syncthing Daemon
+                "SYNCTHING_API_KEY": ("Syncthing API Key:", QLineEdit, ""), # Consider auto-generating/retrieving
+                "SYNCTHING_LISTEN_ADDRESS": ("Syncthing Listen Address:", QLineEdit, "127.0.0.1:8385"),
+            }),
             ("File Watching", {
                 "WATCH_LOCAL_FILES": ("Watch Local Files:", QCheckBox, True),
                 "WATCH_DELAY_SECONDS": ("Watch Delay (seconds):", QSpinBox, 2), # Use QSpinBox
             }),
+            # --- Remove Rsync Group ---
+            # ("Rsync", { ... }), # This comment seems misplaced based on the diff keeping the Rsync group below
             ("Rsync", { # Renamed Group Box
                 # Use QPlainTextEdit for multi-line options
                 "RSYNC_OPTIONS": ("Rsync Options:", QPlainTextEdit, "-avz --progress --delete"), # Updated key, label, and default
@@ -196,6 +211,11 @@ QPushButton:pressed {
                     hbox.addWidget(browse_button) # Add the Browse button
                     form_layout.addRow(QLabel(label_text), hbox) # Add the hbox containing both
                 else:
+                    # Add tooltips for Syncthing fields
+                    if key == "REMOTE_SYNCTHING_DEVICE_ID":
+                        widget.setToolTip("Enter the Device ID of the remote Syncthing instance you want to sync with.")
+                    elif key == "SYNCTHING_API_KEY":
+                        widget.setToolTip("API Key for TurboSync to control its local Syncthing daemon. Leave blank to attempt auto-retrieval on start.")
                     # Default behavior for other widget types
                     form_layout.addRow(QLabel(label_text), widget)
 

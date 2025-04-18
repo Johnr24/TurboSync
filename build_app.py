@@ -162,6 +162,7 @@ def build_app(args):
     print("Locating required binaries (fswatch, rsync)...") # Changed rclone to rsync
     fswatch_path = find_required_binary("fswatch")
     rsync_path = find_required_binary("rsync") # Changed to rsync
+    syncthing_path = find_required_binary("syncthing") # Add syncthing
     print("Required binaries located successfully.")
 
     # Make sure dependencies are installed
@@ -282,6 +283,10 @@ app = BUNDLE(
         dest_rsync = os.path.join(macos_dir, os.path.basename(rsync_path))
         shutil.copy2(rsync_path, dest_rsync)
         print(f"  - Copied {os.path.basename(rsync_path)} to {macos_dir}")
+
+       dest_syncthing = os.path.join(macos_dir, os.path.basename(syncthing_path))
+       shutil.copy2(syncthing_path, dest_syncthing)
+       print(f"  - Copied {os.path.basename(syncthing_path)} to {macos_dir}")
     except Exception as e:
         print(f"Error manually copying binaries: {e}")
         # Decide if build should fail here? For now, just warn and continue.
@@ -296,6 +301,7 @@ app = BUNDLE(
     macos_dir = os.path.join(app_path, "Contents", "MacOS")
     fswatch_bundled_path = os.path.join(macos_dir, os.path.basename(fswatch_path))
     rsync_bundled_path = os.path.join(macos_dir, os.path.basename(rsync_path))
+    syncthing_bundled_path = os.path.join(macos_dir, os.path.basename(syncthing_path))
 
     print(f"Setting execute permissions for bundled binaries in {macos_dir}...")
     try:
@@ -310,6 +316,12 @@ app = BUNDLE(
              print(f"  - Set +x for {os.path.basename(rsync_path)}")
         else:
              print(f"  - Warning: Bundled rsync not found at {rsync_bundled_path}")
+
+       if os.path.exists(syncthing_bundled_path):
+            subprocess.run(["chmod", "+x", syncthing_bundled_path], check=True)
+            print(f"  - Set +x for {os.path.basename(syncthing_path)}")
+       else:
+            print(f"  - Warning: Bundled syncthing not found at {syncthing_bundled_path}")
     except Exception as e:
         print(f"Warning: Failed to set execute permissions for bundled binaries: {e}")
 
