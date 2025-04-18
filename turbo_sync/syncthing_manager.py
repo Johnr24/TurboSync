@@ -277,6 +277,9 @@ class SyncthingApiClient:
         """Internal helper to make API requests."""
         url = self.base_url + endpoint
         try:
+            # --- Add this logging line ---
+            logger.debug(f"Sending API request: {method} {url} with API Key: {self.headers.get('X-API-Key')}")
+            # --- End added line ---
             response = requests.request(
                 method,
                 url,
