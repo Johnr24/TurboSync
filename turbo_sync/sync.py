@@ -405,7 +405,8 @@ def update_syncthing_configuration():
                  logger.error(message)
                  error_occurred = True
             else:
-                 message = f"Syncthing configuration updated successfully. Added: {len(folders_to_add)}, Removed: {len(folders_to_remove)}."
+                 # Use the variables calculated for the source instance (should be same count for dest)
+                 message = f"Syncthing configuration updated successfully. Added: {len(folders_to_add_source)}, Removed: {len(folders_to_remove_source)}."
                  logger.info(message)
                  # Optional: Trigger a restart if needed, though Syncthing often reloads config automatically
                  # api_client.restart_syncthing()
