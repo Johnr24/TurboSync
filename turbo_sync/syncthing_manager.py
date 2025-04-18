@@ -222,7 +222,10 @@ def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, lo
 
 def stop_syncthing_daemon(process):
     """Stops the Syncthing daemon process."""
-    if process and process.poll() is None: # Check if process exists and is running
+    # Log the poll status *before* the check for clarity
+    poll_result = process.poll() if process else 'No process object'
+    logger.debug(f"Checking process status before stop attempt (PID: {process.pid if process else 'N/A'}). poll() result: {poll_result}")
+    if process and poll_result is None: # Check if process exists and is running using the stored result
         logger.info(f"Attempting to terminate Syncthing daemon (PID: {process.pid})...")
         try:
             # Ask Syncthing to shut down gracefully via terminate() (sends SIGTERM)
