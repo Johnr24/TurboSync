@@ -25,12 +25,12 @@ DEFAULT_CONFIG = {
     'watch_delay_seconds': 2,
     'start_at_login': False,
     # Syncthing Instance A (Source) Defaults
-    'syncthing_api_address_source': '127.0.0.1:8384',
-    'syncthing_gui_address_source': '127.0.0.1:8385',
+    'syncthing_api_address_source': '127.0.0.1:28384', # Changed port
+    'syncthing_gui_address_source': '127.0.0.1:28385', # Changed port
     'syncthing_api_key_source': '',
     # Syncthing Instance B (Destination) Defaults
-    'syncthing_api_address_dest': '127.0.0.1:8386',
-    'syncthing_gui_address_dest': '127.0.0.1:8387',
+    'syncthing_api_address_dest': '127.0.0.1:28386', # Changed port
+    'syncthing_gui_address_dest': '127.0.0.1:28387', # Changed port
     'syncthing_api_key_dest': '',
 }
 
