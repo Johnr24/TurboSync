@@ -141,6 +141,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
             # --- Add this line ---
             self.cleanup_syncthing() # Ensure any old instances are stopped first
+            time.sleep(1) # Add a small delay to allow OS to release ports
             # --- End added line ---
 
             logging.debug(f"Loading configuration using path: {USER_ENV_PATH}")
