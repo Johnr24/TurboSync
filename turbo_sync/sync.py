@@ -110,11 +110,13 @@ def load_config(dotenv_path=None):
     if not config['is_valid']:
          logger.warning(f"Configuration issue: {config['validation_message']}")
     # Log key values regardless of validity for debugging
-    logger.info(f"  Mounted Volume Path (Source): {config.get('mounted_path', config['mounted_volume_path'])}") # Show mounted_path if set
+    logger.info(f"  Source Directory: {config['source_dir']}")
     logger.info(f"  Local Directory (Destination): {config['local_dir']}")
     logger.info(f"  Sync Interval: {config['sync_interval']} minutes")
-    logger.info(f"  Remote Syncthing Device ID: {config['remote_syncthing_device_id']}")
-    logger.info(f"  Local Syncthing API Address: {config['syncthing_listen_address']}")
+    logger.info(f"  Syncthing Source API: {config['syncthing_api_address_source']}")
+    logger.info(f"  Syncthing Source GUI: {config['syncthing_gui_address_source']}")
+    logger.info(f"  Syncthing Dest API: {config['syncthing_api_address_dest']}")
+    logger.info(f"  Syncthing Dest GUI: {config['syncthing_gui_address_dest']}")
     logger.info(f"  Local File Watching: {config['watch_local_files']}")
     if config['watch_local_files']:
         logger.info(f"  File Watch Delay: {config['watch_delay_seconds']} seconds")
