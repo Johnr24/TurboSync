@@ -199,60 +199,32 @@ def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, lo
             start_new_session=start_new_session,
             text=True
         )
-        logger.info(f"Syncthing daemon ({instance_id}) process created (PID: {process.pid}). Verifying startup...")
+        logger.info(f"Syncthing daemon ({instance_id}) process created (PID: {process.pid}). Waiting briefly...")
 
-        # --- Verification Loop ---
-        max_retries = 5
-        retry_delay = 1.0 # seconds
-        health_checked = False
-        for attempt in range(max_retries):
-            time.sleep(retry_delay)
-            exit_code = process.poll()
-            if exit_code is not None:
-                # Process exited prematurely
-                stderr_output = "Could not read stderr."
-                try:
-                    stderr_output = process.stderr.read()
-                except Exception as e:
-                    logger.error(f"Error reading stderr from failed {instance_id} process: {e}")
-                error_msg = f"Syncthing daemon ({instance_id}, PID: {process.pid}) exited prematurely with code {exit_code}. Stderr: {stderr_output}"
-                logger.error(error_msg)
-                return None, error_msg # Return failure
+        # Wait a short time to see if it exits immediately
+        time.sleep(2.0) # Increased sleep slightly
+        exit_code = process.poll()
 
-            # Process still running, attempt health check
-            # Use a temporary client instance for the health check, no API key needed
-            # We use the GUI address because that's what Syncthing listens on for API/GUI
-            temp_client = SyncthingApiClient(api_key="dummy_key_not_used", address=gui_address)
-            if temp_client.check_health():
-                 logger.info(f"Syncthing daemon ({instance_id}, PID: {process.pid}) started successfully and passed health check.")
-                 health_checked = True
-                 break # Exit loop on success
-            else:
-                 logger.debug(f"Health check attempt {attempt + 1}/{max_retries} failed for {instance_id} at {gui_address}. Retrying...")
-        # --- End Verification Loop ---
-
-        if not health_checked:
-            # Loop finished without successful health check
+        if exit_code is not None:
+            # Process exited prematurely
             stderr_output = "Could not read stderr."
             try:
-                 stderr_output = process.stderr.read()
+                stderr_output = process.stderr.read()
             except Exception as e:
-                 logger.error(f"Error reading stderr from potentially failed {instance_id} process: {e}")
-            error_msg = f"Syncthing daemon ({instance_id}, PID: {process.pid}) failed to pass health check after {max_retries} attempts. Stderr: {stderr_output}"
+                logger.error(f"Error reading stderr from failed {instance_id} process: {e}")
+            error_msg = f"Syncthing daemon ({instance_id}, PID: {process.pid}) exited immediately with code {exit_code}. Stderr: {stderr_output}"
             logger.error(error_msg)
-            # Terminate the potentially lingering process
-            stop_syncthing_daemon(process)
             return None, error_msg # Return failure
-
-        # If health check passed
-        return process, None # Return the running process object and no error
+        else:
+            # Process is still running after the sleep
+            logger.info(f"Syncthing daemon ({instance_id}, PID: {process.pid}) appears to have started successfully.")
+            return process, None # Return the running process object
 
     except Exception as e:
-        logger.exception(f"Failed to start or verify Syncthing daemon ({instance_id}): {e}")
-        # Ensure process is cleaned up if Popen succeeded but verification failed
+        logger.exception(f"Failed to start Syncthing daemon ({instance_id}): {e}")
         if process and process.poll() is None:
-             stop_syncthing_daemon(process)
-        return None, f"Failed to start/verify Syncthing ({instance_id}): {e}"
+             stop_syncthing_daemon(process) # Clean up if Popen succeeded but subsequent steps failed
+        return None, f"Failed to start Syncthing ({instance_id}): {e}"
 
 def stop_syncthing_daemon(process):
     """Stops the Syncthing daemon process."""
@@ -394,6 +366,17 @@ class SyncthingApiClient:
     def get_connections(self):
         """Get information about current connections."""
         return self._request('GET', '/system/connections')
+
+    def ping(self):
+        """Pings the Syncthing API to check connectivity and authentication."""
+        logger.debug(f"Pinging Syncthing API at {self.base_url}/system/ping")
+        response = self._request('GET', '/system/ping')
+        if response is not None and isinstance(response, dict) and response.get('ping') == 'pong':
+            logger.info(f"Syncthing API ping successful for {self.base_url}")
+            return True
+        else:
+            logger.error(f"Syncthing API ping failed for {self.base_url}. Response: {response}")
+            return False
 
     # --- Helper methods for modifying config structure (use before calling update_config) ---
 

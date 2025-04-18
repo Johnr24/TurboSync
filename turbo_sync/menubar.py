@@ -230,8 +230,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.api_client_dest = None
 
     def _start_syncthing_daemons_and_clients(self):
-        """Generates initial configs, starts the TWO Syncthing daemons, verifies startup,
-           and initializes their API clients if they are running."""
+        """Generates initial configs, starts the TWO Syncthing daemons, and initializes their API clients."""
         if not self.config or not self.config.get('is_valid'):
             logging.warning("Cannot start Syncthing daemons: Configuration is invalid.")
             return
@@ -248,31 +247,44 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             logging.info("Syncthing source daemon already running.")
         else:
             logging.info("Preparing to start Syncthing source daemon...")
-            api_addr_source = self.config.get('syncthing_api_address_source') # Still needed for start command? No.
+            # api_addr_source = self.config.get('syncthing_api_address_source') # Not used in command
             gui_addr_source = self.config.get('syncthing_gui_address_source')
-            if not gui_addr_source: # Only need GUI address now
+            if not gui_addr_source:
                  logging.error("Source Syncthing GUI address missing in config.")
                  self.syncthing_process_source = None
             else:
                 logging.info("Generating initial config for source instance...")
                 if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_SOURCE):
-                    logging.info("Attempting to start and verify Syncthing source daemon...")
-                    # start_syncthing_daemon now handles verification
-                    process, error_msg = start_syncthing_daemon(
+                    logging.info("Attempting to start Syncthing source daemon...")
+                    process, error_msg = start_syncthing_daemon( # Capture process object
                         instance_id="source",
                         config_dir=SYNCTHING_CONFIG_DIR_SOURCE,
-                        api_address=None, # Not used by start command anymore
+                        api_address=None, # Not used
                         gui_address=gui_addr_source,
                         log_file=SYNCTHING_LOG_FILE_SOURCE
                     )
-                    if process:
-                        logging.info(f"Syncthing source daemon verified successfully (PID: {process.pid}).")
-                        self.syncthing_process_source = process
+                    if not process:
+                        # start_syncthing_daemon already logged the error
+                        rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Could not start: {error_msg[:100]}...")
+                        self.syncthing_process_source = None # Ensure it's None
                     else:
-                        # start_syncthing_daemon already logged the detailed error
-                        logging.error(f"Failed to start or verify Syncthing source daemon: {error_msg}")
-                        rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Could not start/verify: {error_msg[:100]}...") # Show truncated error
-                        self.syncthing_process_source = None
+                        # Check if the process exited quickly (start_syncthing_daemon waits ~2s)
+                        exit_code = process.poll()
+                        if exit_code is not None:
+                             stderr_output = "Could not read stderr."
+                             try:
+                                 stderr_output = process.stderr.read()
+                             except Exception as e:
+                                 logging.error(f"Error reading stderr from failed source process: {e}")
+
+                             logging.error(f"Syncthing source daemon (PID: {process.pid}) exited immediately with code {exit_code}.")
+                             logging.error(f"Syncthing source stderr:\n---\n{stderr_output}\n---")
+                             rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Exited immediately (code {exit_code}). Check logs.")
+                             self.syncthing_process_source = None # Mark as failed
+                        else:
+                             # Process is still running after the initial sleep
+                             logging.info(f"Syncthing source daemon started successfully (PID: {process.pid}).")
+                             self.syncthing_process_source = process # Store the running process
                 else:
                     logging.error("Failed to generate initial config for source instance. Daemon not started.")
                     rumps.notification("TurboSync Error", "Syncthing Source Config Failed", "Could not generate initial config.")
@@ -283,37 +295,50 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             logging.info("Syncthing destination daemon already running.")
         else:
             logging.info("Preparing to start Syncthing destination daemon...")
-            api_addr_dest = self.config.get('syncthing_api_address_dest') # Not used by start command
+            # api_addr_dest = self.config.get('syncthing_api_address_dest') # Not used in command
             gui_addr_dest = self.config.get('syncthing_gui_address_dest')
-            if not gui_addr_dest: # Only need GUI address
+            if not gui_addr_dest:
                  logging.error("Destination Syncthing GUI address missing in config.")
                  self.syncthing_process_dest = None
             else:
                 logging.info("Generating initial config for destination instance...")
                 if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_DEST):
-                    logging.info("Attempting to start and verify Syncthing destination daemon...")
-                    # start_syncthing_daemon now handles verification
-                    process, error_msg = start_syncthing_daemon(
+                    logging.info("Attempting to start Syncthing destination daemon...")
+                    process, error_msg = start_syncthing_daemon( # Capture process object
                         instance_id="dest",
                         config_dir=SYNCTHING_CONFIG_DIR_DEST,
-                        api_address=None, # Not used by start command anymore
+                        api_address=None, # Not used
                         gui_address=gui_addr_dest,
                         log_file=SYNCTHING_LOG_FILE_DEST
                     )
-                    if process:
-                        logging.info(f"Syncthing destination daemon verified successfully (PID: {process.pid}).")
-                        self.syncthing_process_dest = process
+                    if not process:
+                        # start_syncthing_daemon already logged the error
+                        rumps.notification("TurboSync Error", "Syncthing Dest Failed", f"Could not start: {error_msg[:100]}...")
+                        self.syncthing_process_dest = None # Ensure it's None
                     else:
-                        # start_syncthing_daemon already logged the detailed error
-                        logging.error(f"Failed to start or verify Syncthing destination daemon: {error_msg}")
-                        rumps.notification("TurboSync Error", "Syncthing Dest Failed", f"Could not start/verify: {error_msg[:100]}...") # Show truncated error
-                        self.syncthing_process_dest = None
+                        # Check if the process exited quickly (start_syncthing_daemon waits ~2s)
+                        exit_code = process.poll()
+                        if exit_code is not None:
+                             stderr_output = "Could not read stderr."
+                             try:
+                                 stderr_output = process.stderr.read()
+                             except Exception as e:
+                                 logging.error(f"Error reading stderr from failed dest process: {e}")
+
+                             logging.error(f"Syncthing destination daemon (PID: {process.pid}) exited immediately with code {exit_code}.")
+                             logging.error(f"Syncthing destination stderr:\n---\n{stderr_output}\n---")
+                             rumps.notification("TurboSync Error", "Syncthing Dest Failed", f"Exited immediately (code {exit_code}). Check logs.")
+                             self.syncthing_process_dest = None # Mark as failed
+                        else:
+                             # Process is still running after the initial sleep
+                             logging.info(f"Syncthing destination daemon started successfully (PID: {process.pid}).")
+                             self.syncthing_process_dest = process # Store the running process
                 else:
                     logging.error("Failed to generate initial config for destination instance. Daemon not started.")
                     rumps.notification("TurboSync Error", "Syncthing Dest Config Failed", "Could not generate initial config.")
                     self.syncthing_process_dest = None
 
-        # --- Initialize API Clients (only if daemons were successfully started and verified) ---
+        # --- Initialize API Clients (only if daemons are actually running) ---
         self._initialize_api_clients()
 
     def _initialize_api_clients(self):
@@ -338,13 +363,20 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             api_key_source = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_SOURCE)
             if api_key_source and gui_addr_source: # <-- Check gui_addr_source
                 try:
-                    # Use gui_addr_source for the client's address
                     self.api_client_source = SyncthingApiClient(api_key=api_key_source, address=gui_addr_source)
-                    logging.info(f"Source Syncthing API client initialized successfully (using GUI address: {gui_addr_source}).") # Log GUI address used
+                    logging.info(f"Source Syncthing API client initialized (using GUI address: {gui_addr_source}). Pinging...")
+                    # --- Add Ping Check ---
+                    if self.api_client_source.ping():
+                        logging.info("Source API ping successful.")
+                    else:
+                        logging.error("Source API ping FAILED. Check API key and Syncthing instance.")
+                        rumps.notification("TurboSync Error", "Source API Ping Failed", "Could not verify connection to source Syncthing.")
+                        self.api_client_source = None # Invalidate client if ping fails
+                    # --- End Ping Check ---
                 except Exception as api_e:
-                    logging.error(f"Failed to initialize Source Syncthing API client: {api_e}")
-                    rumps.notification("TurboSync Error", "Source API Error", f"Could not connect: {api_e}")
-                    self.api_client_source = None # Ensure it's None on error
+                    logging.error(f"Failed to initialize or ping Source Syncthing API client: {api_e}")
+                    rumps.notification("TurboSync Error", "Source API Error", f"Could not connect/ping: {api_e}")
+                    self.api_client_source = None
             else:
                 if not api_key_source:
                     logging.error("Source Syncthing API key not found in config.xml.")
@@ -364,13 +396,20 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             api_key_dest = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_DEST)
             if api_key_dest and gui_addr_dest: # <-- Check gui_addr_dest
                 try:
-                    # Use gui_addr_dest for the client's address
                     self.api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=gui_addr_dest)
-                    logging.info(f"Destination Syncthing API client initialized successfully (using GUI address: {gui_addr_dest}).") # Log GUI address used
+                    logging.info(f"Destination Syncthing API client initialized (using GUI address: {gui_addr_dest}). Pinging...")
+                    # --- Add Ping Check ---
+                    if self.api_client_dest.ping():
+                        logging.info("Destination API ping successful.")
+                    else:
+                        logging.error("Destination API ping FAILED. Check API key and Syncthing instance.")
+                        rumps.notification("TurboSync Error", "Dest API Ping Failed", "Could not verify connection to destination Syncthing.")
+                        self.api_client_dest = None # Invalidate client if ping fails
+                    # --- End Ping Check ---
                 except Exception as api_e:
-                    logging.error(f"Failed to initialize Destination Syncthing API client: {api_e}")
-                    rumps.notification("TurboSync Error", "Dest API Error", f"Could not connect: {api_e}")
-                    self.api_client_dest = None # Ensure it's None on error
+                    logging.error(f"Failed to initialize or ping Destination Syncthing API client: {api_e}")
+                    rumps.notification("TurboSync Error", "Dest API Error", f"Could not connect/ping: {api_e}")
+                    self.api_client_dest = None
             else:
                 if not api_key_dest:
                     logging.error("Destination Syncthing API key not found in config.xml.")
@@ -382,11 +421,11 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             logging.warning("Destination Syncthing process is not running. Skipping API client initialization.")
             self.api_client_dest = None
 
-        # --- Start Polling Timer (only if BOTH clients initialized) ---
+        # --- Start Polling Timer (only if BOTH clients initialized AND pinged successfully) ---
         if self.api_client_source and self.api_client_dest:
             self._start_status_poll_timer()
         else:
-            self._stop_status_poll_timer() # Ensure timer is stopped if one or both failed
+            self._stop_status_poll_timer() # Ensure timer is stopped if one or both failed init/ping
 
     def create_fallback_icon(self):
         """Creates a simple fallback icon if the main one is missing."""
