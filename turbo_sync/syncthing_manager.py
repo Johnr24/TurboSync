@@ -350,6 +350,7 @@ def get_api_key_from_config(config_dir, retries=15, delay=0.5): # Increased retr
     config_path = os.path.join(config_dir, 'config.xml')
     logger.debug(f"Attempting to read API key from: {config_path} (will retry up to {retries} times)")
 
+    logger.debug(f"Entering retry loop for {config_dir}...") # Added log
     for attempt in range(retries):
         logger.debug(f"API Key Retrieval Attempt {attempt + 1}/{retries} for {config_dir}")
         if os.path.exists(config_path):
@@ -396,4 +397,5 @@ def get_api_key_from_config(config_dir, retries=15, delay=0.5): # Increased retr
         time.sleep(delay)
 
     logger.error(f"Failed to retrieve API key from {config_path} after {retries} attempts.")
+    logger.debug(f"Exiting get_api_key_from_config for {config_dir} - returning None.") # Added log
     return None
