@@ -31,19 +31,16 @@ def load_config(dotenv_path=None):
         load_dotenv(override=True) # Original call
 
     logger.debug(f"Attempting to load configuration values after load_dotenv(override=True, path='{dotenv_path}')")
-    logger.debug(f"RSYNC_OPTIONS from env: {os.getenv('RSYNC_OPTIONS')}") # Changed from RCLONE_OPTIONS
+    # logger.debug(f"RSYNC_OPTIONS from env: {os.getenv('RSYNC_OPTIONS')}") # No longer using rsync
 
     config = {
-        'remote_user': os.getenv('REMOTE_USER'),
-        'remote_host': os.getenv('REMOTE_HOST'),
-        'remote_port': os.getenv('REMOTE_PORT', '22'),
-        'remote_dir': os.getenv('REMOTE_DIR'),
+        # SSH details removed
         'local_dir': os.getenv('LOCAL_DIR'),
         'sync_interval': int(os.getenv('SYNC_INTERVAL', '5')), # Interval for checking/updating Syncthing config
-        'use_mounted_volume': os.getenv('USE_MOUNTED_VOLUME', '').lower() == 'true',
-        'mounted_volume_path': os.getenv('MOUNTED_VOLUME_PATH', ''),
+        'use_mounted_volume': True, # Always true now
+        'mounted_volume_path': os.getenv('MOUNTED_VOLUME_PATH', ''), # Path to the source volume
         # --- Syncthing Specific Config ---
-        'remote_syncthing_device_id': os.getenv('REMOTE_SYNCTHING_DEVICE_ID'),
+        'remote_syncthing_device_id': os.getenv('REMOTE_SYNCTHING_DEVICE_ID'), # ID of the remote Syncthing instance
         'syncthing_api_key': os.getenv('SYNCTHING_API_KEY'), # Optional, can be auto-retrieved
         'syncthing_listen_address': os.getenv('SYNCTHING_LISTEN_ADDRESS', '127.0.0.1:8385'), # Default local daemon API
         # --- File Watching Config ---
@@ -54,67 +51,26 @@ def load_config(dotenv_path=None):
     }
 
     # Validate required config
-    required_keys = ['local_dir', 'remote_syncthing_device_id'] # Local dir and remote ID are essential
-    if not config['use_mounted_volume']:
-        # If not using mounted volume, SSH details are needed *only* for finding .livework files
-        required_keys.extend(['remote_user', 'remote_host', 'remote_dir'])
-        logger.info("SSH details required for discovering .livework files remotely.")
-    elif not config['mounted_volume_path']:
-         # If using mounted volume for discovery, the path must be set
-         required_keys.append('mounted_volume_path')
-         logger.info("Mounted volume path required for discovering .livework files locally.")
+    # Essential keys: Local directory, path to the mounted source volume, and the remote Syncthing ID
+    required_keys = ['local_dir', 'mounted_volume_path', 'remote_syncthing_device_id']
 
     missing_keys = [key for key in required_keys if not config.get(key)]
     if missing_keys:
         raise ValueError(f"Missing required configuration: {', '.join(missing_keys)}")
-    
-    # Ensure remote_dir is properly formatted for shell commands
-    # Remove any extra quotes that might have been included in the env file
-    if config['remote_dir'].startswith('"') and config['remote_dir'].endswith('"'):
-        config['remote_dir'] = config['remote_dir'][1:-1]
-    elif config['remote_dir'].startswith("'") and config['remote_dir'].endswith("'"):
-        config['remote_dir'] = config['remote_dir'][1:-1]
-    
-    # Check for mounted volume usage
-    config['is_mounted'] = False
-    
-    # First priority: Use explicitly specified mounted volume path if provided
-    if config['mounted_volume_path'] and config['use_mounted_volume']:
-        if os.path.exists(config['mounted_volume_path']):
-            logger.info(f"Using explicitly configured mounted volume: {config['mounted_volume_path']}")
-            config['mounted_path'] = config['mounted_volume_path']
-            config['is_mounted'] = True
-        else:
-            logger.warning(f"Configured MOUNTED_VOLUME_PATH not found: {config['mounted_volume_path']}")
-            logger.warning("Will try auto-detection or fall back to SSH")
-    
-    # Second priority: Try auto-detection if mounted volume is enabled but path not specified or not found
-    if not config['is_mounted'] and config['use_mounted_volume']:
-        # Convert from remote path format (with escape characters) to local path format (without escapes)
-        raw_remote_dir = config['remote_dir'].replace('\\', '')  # Remove escape characters
-        mounted_path = raw_remote_dir.replace('volume1', 'Volumes')
-        
-        if os.path.exists(f"/{mounted_path}"):
-            logger.info(f"Using auto-detected mounted volume at /{mounted_path}")
-            config['mounted_path'] = f"/{mounted_path}"
-            config['is_mounted'] = True
-        else:
-            logger.warning(f"Could not auto-detect mounted volume at /{mounted_path}")
-            logger.debug(f"Path checked: /{mounted_path}")
-    
-    # If not using mounted volume, log that we're using SSH
-    if not config['is_mounted']:
-        logger.info("Not using mounted volume, will connect via SSH")
-    
+
+    # Check if the mounted volume path exists
+    if os.path.exists(config['mounted_volume_path']):
+        logger.info(f"Using configured mounted volume: {config['mounted_volume_path']}")
+        config['mounted_path'] = config['mounted_volume_path'] # Use 'mounted_path' internally for consistency
+        config['is_mounted'] = True # Keep this flag for clarity elsewhere
+    else:
+        # If the specified path doesn't exist, it's a fatal configuration error
+        raise ValueError(f"Configured MOUNTED_VOLUME_PATH not found: {config['mounted_volume_path']}")
+
     logger.info("Configuration loaded:")
-    logger.info(f"  Remote: {config['remote_user']}@{config['remote_host']}:{config['remote_port']}")
-    logger.info(f"  Remote Directory: {config['remote_dir']}")
-    logger.info(f"  Local Directory: {config['local_dir']}")
+    logger.info(f"  Mounted Volume Path (Source): {config['mounted_path']}")
+    logger.info(f"  Local Directory (Destination): {config['local_dir']}")
     logger.info(f"  Sync Interval: {config['sync_interval']} minutes")
-    logger.info(f"  Using Mounted Volume: {config['is_mounted']}")
-    if config['is_mounted']:
-        logger.info(f"  Mounted Volume Path: {config['mounted_path']}")
-    
     # Log Syncthing specific config
     logger.info(f"  Remote Syncthing Device ID: {config['remote_syncthing_device_id']}")
     logger.info(f"  Local Syncthing API Address: {config['syncthing_listen_address']}")
@@ -132,14 +88,17 @@ def find_livework_dirs(config):
     logger.info("Scanning for .livework files")
     
     livework_dirs = []
-    
-    # If the volume is mounted locally, search directly on the filesystem
-    if config.get('is_mounted', False):
-        mounted_path = config['mounted_path']
-        logger.info(f"Searching for .livework files in mounted volume: {mounted_path}")
-        
-        try:
-            # Log the top-level directory contents for debugging
+    mounted_path = config.get('mounted_path') # Get the validated mounted path
+
+    if not mounted_path:
+        logger.error("Mounted path configuration is missing, cannot scan for .livework files.")
+        return []
+
+    logger.info(f"Searching for .livework files in mounted volume: {mounted_path}")
+
+    try:
+        # Log the top-level directory contents for debugging
+        if os.path.exists(mounted_path):
             logger.debug(f"Contents of mounted directory: {mounted_path}")
             try:
                 entries = os.listdir(mounted_path)
@@ -157,56 +116,16 @@ def find_livework_dirs(config):
                     livework_dirs.append(root)
                     logger.info(f"Found .livework in: {root}")
             
-            logger.info(f"Found {len(livework_dirs)} directories with .livework files")
-            return livework_dirs
-            
-        except Exception as e:
-            logger.error(f"Error finding .livework directories in mounted volume: {str(e)}")
-            return []
-    
-    # Otherwise, use SSH to find the directories
-    else:
-        logger.info("Scanning for .livework files on remote server")
-        
-        # Use a more robust command that properly handles paths with spaces and special characters
-        # The command first changes to the remote directory, then finds .livework files
-        # relative to that location to avoid path issues
-        # Use single quotes around the path for better shell escaping
-        remote_dir = config['remote_dir'].replace('"', '\\"')
-        
-        cmd = [
-            'ssh',
-            f"{config['remote_user']}@{config['remote_host']}",
-            '-p', config['remote_port'],
-            f"cd '{remote_dir}' && find . -name '.livework' -type f | xargs -I{{}} dirname {{}}"
-        ]
-        
-        logger.debug(f"Find command: {' '.join(cmd)}")
-        
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            
-            # Process relative paths (they'll start with ./)
-            for line in result.stdout.splitlines():
-                if line.strip():
-                    # Convert relative path to absolute
-                    rel_path = line.strip()
-                    abs_path = os.path.normpath(os.path.join(config['remote_dir'], rel_path))
-                    livework_dirs.append(abs_path)
-                    logger.info(f"Found .livework in: {abs_path}")
-                    
-            logger.info(f"Found {len(livework_dirs)} directories with .livework files")
-            return livework_dirs
-        
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error finding .livework directories: {str(e)}")
-            logger.error(f"Error output: {e.stderr}")
-            return []
+            logger.info(f"Found {len(livework_dirs)} directories with .livework files.")
+        else:
+             logger.error(f"Mounted directory does not exist: {mounted_path}")
+             return []
+
+    except Exception as e:
+        logger.error(f"Error finding .livework directories in mounted volume: {str(e)}")
+        return []
+
+    return livework_dirs
 
 # Removed list_remote_directory (SSH specific, not core sync)
 # Removed sync_directory (rsync specific)
@@ -256,34 +175,39 @@ def update_syncthing_configuration():
             # Decide if we should remove all folders from Syncthing config in this case?
             # For now, just log and proceed to check existing config.
 
-        # Map remote paths to desired local paths and folder IDs
-        desired_folders = {} # {folder_id: {'local_path': '/path/to/local', 'remote_path': '/path/to/remote'}}
-        base_remote_or_mount = config.get('mounted_path') if config['is_mounted'] else config['remote_dir']
+        # Map found source paths (from mounted volume) to desired local paths and folder IDs
+        desired_folders = {} # {folder_id: {'local_path': '/path/to/local', 'source_path': '/path/to/source'}}
+        base_mounted_path = config['mounted_path'] # Use the validated mounted path
 
-        for remote_path in livework_remote_paths:
+        for source_path in livework_remote_paths: # Variable name kept for now, but it's the source path on the mount
             # Derive local path relative to the local_base_dir
-            if remote_path == base_remote_or_mount:
+            if source_path == base_mounted_path:
                 rel_path = '.' # Sync the base directory itself if it has .livework
             else:
                 try:
-                    rel_path = os.path.relpath(remote_path, base_remote_or_mount)
-                except ValueError:
-                    # Fallback if paths are on different drives (e.g., Windows) or other issues
-                    rel_path = os.path.basename(remote_path)
-                    logger.warning(f"Could not determine relative path for '{remote_path}' relative to '{base_remote_or_mount}'. Using basename '{rel_path}'.")
+                    # Calculate path relative to the base of the mounted volume
+                    rel_path = os.path.relpath(source_path, base_mounted_path)
+                except ValueError as e:
+                    # This might happen if paths are fundamentally different (e.g., different drives on Windows, though unlikely here)
+                    rel_path = os.path.basename(source_path)
+                    logger.warning(f"Could not determine relative path for '{source_path}' relative to '{base_mounted_path}'. Using basename '{rel_path}'. Error: {e}")
 
             local_path = os.path.normpath(os.path.join(local_base_dir, rel_path))
             # Create a reasonably unique folder ID (e.g., based on relative path)
             # Replace path separators with underscores for Syncthing ID compatibility
-            folder_id = rel_path.replace(os.path.sep, '_').replace(' ', '_').replace('.', '_livework')
+            # Ensure ID is valid (Syncthing IDs have restrictions)
+            folder_id = re.sub(r'[\\/:"*?<>|]+', '_', rel_path) # Replace invalid chars
+            folder_id = folder_id.replace(' ', '_').replace('.', '_livework') # Replace space and dot
             if not folder_id or folder_id == '_livework': # Handle base directory case
                  folder_id = os.path.basename(local_base_dir) + '_livework_base'
+            # Truncate if too long (Syncthing might have limits) - adjust limit as needed
+            folder_id = folder_id[:64] # Example limit
 
             # Ensure local directory exists (Syncthing might need it)
             os.makedirs(local_path, exist_ok=True)
 
-            desired_folders[folder_id] = {'local_path': local_path, 'remote_path': remote_path}
-            logger.debug(f"Desired folder: ID='{folder_id}', Local='{local_path}', Remote='{remote_path}'")
+            desired_folders[folder_id] = {'local_path': local_path, 'source_path': source_path}
+            logger.debug(f"Desired folder: ID='{folder_id}', Local='{local_path}', Source='{source_path}'")
 
         # 4. Get Current Syncthing Configuration
         logger.info("Fetching current Syncthing configuration via API...")
