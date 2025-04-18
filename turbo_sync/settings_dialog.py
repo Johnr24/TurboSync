@@ -141,12 +141,12 @@ QPushButton:pressed {
             ("Syncthing Instance (Source)", { # Group Box for Source Syncthing Daemon
                 "SYNCTHING_API_ADDRESS_SOURCE": ("API Address:", QLineEdit, "127.0.0.1:28384"), # Changed port
                 "SYNCTHING_GUI_ADDRESS_SOURCE": ("GUI Address:", QLineEdit, "127.0.0.1:28385"), # Changed port
-                "SYNCTHING_API_KEY_SOURCE": ("API Key:", QLineEdit, ""),
+                # "SYNCTHING_API_KEY_SOURCE": ("API Key:", QLineEdit, ""), # Removed - Auto-retrieved
             }),
             ("Syncthing Instance (Destination)", { # Group Box for Destination Syncthing Daemon
                 "SYNCTHING_API_ADDRESS_DEST": ("API Address:", QLineEdit, "127.0.0.1:28386"), # Changed port
                 "SYNCTHING_GUI_ADDRESS_DEST": ("GUI Address:", QLineEdit, "127.0.0.1:28387"), # Changed port
-                "SYNCTHING_API_KEY_DEST": ("API Key:", QLineEdit, ""),
+                # "SYNCTHING_API_KEY_DEST": ("API Key:", QLineEdit, ""), # Removed - Auto-retrieved
             }),
             # File watching now monitors the SOURCE_DIR for .livework changes
             # to trigger Syncthing config updates for BOTH instances.
@@ -205,8 +205,8 @@ QPushButton:pressed {
                          widget.setToolTip("REST API address (e.g., 127.0.0.1:port). Ensure ports are unique.")
                     elif key == "SYNCTHING_GUI_ADDRESS_SOURCE" or key == "SYNCTHING_GUI_ADDRESS_DEST":
                          widget.setToolTip("Web GUI address (e.g., 127.0.0.1:port). Ensure ports are unique and different from API ports.")
-                    elif key == "SYNCTHING_API_KEY_SOURCE" or key == "SYNCTHING_API_KEY_DEST":
-                        widget.setToolTip("API Key for TurboSync to control this Syncthing daemon. Leave blank to attempt auto-retrieval/generation on start.")
+                    # elif key == "SYNCTHING_API_KEY_SOURCE" or key == "SYNCTHING_API_KEY_DEST":
+                    #     widget.setToolTip("API Key for TurboSync to control this Syncthing daemon. Leave blank to attempt auto-retrieval/generation on start.") # Tooltip removed
                     # Default behavior for other widget types
                     form_layout.addRow(QLabel(label_text), widget)
 
