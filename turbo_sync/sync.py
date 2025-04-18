@@ -33,45 +33,59 @@ def load_config(dotenv_path=None):
     logger.debug(f"Attempting to load configuration values after load_dotenv(override=True, path='{dotenv_path}')")
     # logger.debug(f"RSYNC_OPTIONS from env: {os.getenv('RSYNC_OPTIONS')}") # No longer using rsync
 
-    config = {
-        # SSH details removed
-        'local_dir': os.getenv('LOCAL_DIR'),
-        'sync_interval': int(os.getenv('SYNC_INTERVAL', '5')), # Interval for checking/updating Syncthing config
-        'use_mounted_volume': True, # Always true now
-        'mounted_volume_path': os.getenv('MOUNTED_VOLUME_PATH', ''), # Path to the source volume
-        # --- Syncthing Specific Config ---
-        'remote_syncthing_device_id': os.getenv('REMOTE_SYNCTHING_DEVICE_ID'), # ID of the remote Syncthing instance
-        'syncthing_api_key': os.getenv('SYNCTHING_API_KEY'), # Optional, can be auto-retrieved
-        'syncthing_listen_address': os.getenv('SYNCTHING_LISTEN_ADDRESS', '127.0.0.1:8385'), # Default local daemon API
-        # --- File Watching Config ---
-        'watch_local_files': os.getenv('WATCH_LOCAL_FILES', 'true').lower() == 'true',
-        'watch_delay_seconds': int(os.getenv('WATCH_DELAY_SECONDS', '2')),
-        # --- Start at Login ---
-        'start_at_login': os.getenv('START_AT_LOGIN', 'false').lower() == 'true',
-    }
+    config = {}
+    config['local_dir'] = loaded_values.get('LOCAL_DIR', DEFAULT_CONFIG['local_dir'])
+    config['sync_interval'] = int(loaded_values.get('SYNC_INTERVAL', DEFAULT_CONFIG['sync_interval']))
+    config['use_mounted_volume'] = True # Always true
+    config['mounted_volume_path'] = loaded_values.get('MOUNTED_VOLUME_PATH', DEFAULT_CONFIG['mounted_volume_path'])
+    config['remote_syncthing_device_id'] = loaded_values.get('REMOTE_SYNCTHING_DEVICE_ID', DEFAULT_CONFIG['remote_syncthing_device_id'])
+    config['syncthing_api_key'] = loaded_values.get('SYNCTHING_API_KEY', DEFAULT_CONFIG['syncthing_api_key'])
+    config['syncthing_listen_address'] = loaded_values.get('SYNCTHING_LISTEN_ADDRESS', DEFAULT_CONFIG['syncthing_listen_address'])
+    config['watch_local_files'] = str(loaded_values.get('WATCH_LOCAL_FILES', str(DEFAULT_CONFIG['watch_local_files']))).lower() == 'true'
+    config['watch_delay_seconds'] = int(loaded_values.get('WATCH_DELAY_SECONDS', DEFAULT_CONFIG['watch_delay_seconds']))
+    config['start_at_login'] = str(loaded_values.get('START_AT_LOGIN', str(DEFAULT_CONFIG['start_at_login']))).lower() == 'true'
 
-    # Validate required config
-    # Essential keys: Local directory, path to the mounted source volume, and the remote Syncthing ID
-    required_keys = ['local_dir', 'mounted_volume_path', 'remote_syncthing_device_id']
+    # Add the flag indicating source
+    config['loaded_from_file'] = config_loaded_from_file
 
-    missing_keys = [key for key in required_keys if not config.get(key)]
-    if missing_keys:
-        raise ValueError(f"Missing required configuration: {', '.join(missing_keys)}")
+    # --- Validation ---
+    # Only perform strict validation if the config was loaded from a file
+    # If using defaults, assume configuration is needed.
+    config['is_valid'] = False # Assume invalid until proven otherwise
+    config['validation_message'] = "Configuration not loaded from file. Please configure via Settings."
+    config['is_mounted'] = False # Default to false
 
-    # Check if the mounted volume path exists
-    if os.path.exists(config['mounted_volume_path']):
-        logger.info(f"Using configured mounted volume: {config['mounted_volume_path']}")
-        config['mounted_path'] = config['mounted_volume_path'] # Use 'mounted_path' internally for consistency
-        config['is_mounted'] = True # Keep this flag for clarity elsewhere
-    else:
-        # If the specified path doesn't exist, it's a fatal configuration error
-        raise ValueError(f"Configured MOUNTED_VOLUME_PATH not found: {config['mounted_volume_path']}")
+    if config_loaded_from_file:
+        # Essential keys if loaded from file: Local directory, path to the mounted source volume, and the remote Syncthing ID
+        required_keys = ['local_dir', 'mounted_volume_path', 'remote_syncthing_device_id']
+        missing_keys = [key for key in required_keys if not config.get(key)]
 
-    logger.info("Configuration loaded:")
-    logger.info(f"  Mounted Volume Path (Source): {config['mounted_path']}")
+        if missing_keys:
+            config['validation_message'] = f"Missing required configuration: {', '.join(missing_keys)}"
+            logger.error(f"Configuration loaded from file is invalid: {config['validation_message']}")
+        else:
+            # Check if the mounted volume path exists
+            if os.path.exists(config['mounted_volume_path']):
+                logger.info(f"Using configured mounted volume: {config['mounted_volume_path']}")
+                config['mounted_path'] = config['mounted_volume_path'] # Use 'mounted_path' internally
+                config['is_mounted'] = True # Keep this flag for clarity elsewhere
+                config['is_valid'] = True # Configuration is valid
+                config['validation_message'] = "Configuration loaded and valid."
+                logger.info("Configuration loaded from file is valid.")
+            else:
+                # If the specified path doesn't exist, it's a fatal configuration error *for this loaded config*
+                config['validation_message'] = f"Configured MOUNTED_VOLUME_PATH not found: {config['mounted_volume_path']}"
+                logger.error(f"Configuration loaded from file is invalid: {config['validation_message']}")
+                # Do not raise ValueError here, let the caller handle invalid state
+
+    # Log final configuration state
+    logger.info(f"Configuration State: {'Loaded from file' if config_loaded_from_file else 'Using defaults'}, Valid: {config['is_valid']}")
+    if not config['is_valid']:
+         logger.warning(f"Configuration issue: {config['validation_message']}")
+    # Log key values regardless of validity for debugging
+    logger.info(f"  Mounted Volume Path (Source): {config.get('mounted_path', config['mounted_volume_path'])}") # Show mounted_path if set
     logger.info(f"  Local Directory (Destination): {config['local_dir']}")
     logger.info(f"  Sync Interval: {config['sync_interval']} minutes")
-    # Log Syncthing specific config
     logger.info(f"  Remote Syncthing Device ID: {config['remote_syncthing_device_id']}")
     logger.info(f"  Local Syncthing API Address: {config['syncthing_listen_address']}")
     logger.info(f"  Local File Watching: {config['watch_local_files']}")
@@ -79,7 +93,7 @@ def load_config(dotenv_path=None):
         logger.info(f"  File Watch Delay: {config['watch_delay_seconds']} seconds")
     logger.info(f"  Start at Login: {config['start_at_login']}")
 
-    return config
+    return config # Return the dictionary, caller checks 'is_valid'
 
 # Removed test_remote_connection (SSH specific, only used for initial check, not core sync)
 
@@ -147,10 +161,16 @@ def update_syncthing_configuration():
     try:
         # 1. Load TurboSync Configuration
         user_env_path = os.path.join(os.path.expanduser(f'~/Library/Application Support/TurboSync'), '.env')
-        config = load_config(dotenv_path=user_env_path)
-        if not config:
-            raise ValueError("Failed to load TurboSync configuration.")
+        config = load_config(dotenv_path=user_env_path) # load_config now returns dict always
 
+        # --- Check if config is valid before proceeding ---
+        if not config or not config.get('is_valid'):
+             message = config.get('validation_message', "Configuration is invalid or missing.")
+             logger.error(f"Cannot update Syncthing configuration: {message}")
+             # Return error state without raising exception here, let caller handle UI
+             return False, f"Config Error: {message}"
+
+        # Config is valid, proceed with extracting values
         local_base_dir = config['local_dir']
         remote_device_id = config['remote_syncthing_device_id']
         api_addr = config.get('syncthing_listen_address', DEFAULT_SYNCTHING_API_ADDRESS)

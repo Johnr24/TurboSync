@@ -74,24 +74,32 @@ USER_ENV_PATH = os.path.join(USER_CONFIG_DIR, '.env')
 
 # Removed get_resource_path function (moved to utils.py)
 
-def ensure_env_file():
-    """Ensure the .env file exists in the user config dir, create it from template if it doesn't"""
-    logging.debug(f"Checking for user .env file at {USER_ENV_PATH}")
-    os.makedirs(USER_CONFIG_DIR, exist_ok=True) # Ensure the directory exists
-
-    if not os.path.exists(USER_ENV_PATH):
-        logging.info(f"User .env file not found at {USER_ENV_PATH}, creating from template.")
+def ensure_config_dir():
+    """Ensure the user configuration directory exists."""
+    logging.debug(f"Ensuring user config directory exists at {USER_CONFIG_DIR}")
+    try:
+        os.makedirs(USER_CONFIG_DIR, exist_ok=True) # Ensure the directory exists
+        logging.debug(f"User config directory confirmed: {USER_CONFIG_DIR}")
+        return True
+    except Exception as e:
+        logging.exception(f"Failed to create or access user config directory: {USER_CONFIG_DIR}")
+        # Show a critical error if the directory cannot be created/accessed
         try:
-            # Find the bundled template file
-            template_path = get_resource_path(".env.template")
-            logging.debug(f"Template path resolved to: {template_path}") # Log resolved path
+            import rumps
+            rumps.alert(
+                title="TurboSync Critical Error",
+                message=f"Could not create or access the configuration directory:\n{USER_CONFIG_DIR}\n\nPlease check permissions.\nError: {e}"
+            )
+        except Exception as alert_e:
+            logging.error(f"Failed to show rumps alert for config dir error: {alert_e}")
+            print(f"CRITICAL ERROR: Could not create/access config directory {USER_CONFIG_DIR}. Check permissions. Error: {e}", file=sys.stderr)
+        return False # Indicate critical failure
 
-            if not template_path or not os.path.exists(template_path): # Check existence *before* copy
-                 logging.error(f"Bundled .env.template not found or path invalid: {template_path}")
-                 # Fallback: Create a basic default if template is missing (should not happen)
-                 logging.warning("Creating basic default .env as template was missing.")
-                 template_content = """# Remote server configuration (DEFAULT - TEMPLATE MISSING)
-REMOTE_USER=username
+# Removed the old ensure_env_file logic that copied the template
+
+def setup_icon():
+    """Ensure the icon file path is correctly determined for the menubar app."""
+    logging.debug("Determining application icon path")
 REMOTE_HOST=example.com
 REMOTE_PORT=22
 REMOTE_DIR=/path/to/remote/directory
@@ -235,25 +243,15 @@ def main():
             # Get icon path (setup_icon now just returns the path)
             icon_path = setup_icon() 
             # Note: The actual icon setting is handled within run_app (menubar.py)
-            
-            # Ensure .env file exists
-            env_ok = ensure_env_file()
-            if not env_ok:
-                # If ensure_env_file returned False, it means the file is missing AND
-                # could not be created, or requires user setup. Stop the app.
-                error_msg = "Setup incomplete. Could not create or find required .env configuration file. Please check logs or manually create ~/.Library/Application Support/TurboSync/.env from the template."
-                logging.error(error_msg)
-                try:
-                    # Attempt to show a final alert before exiting
-                    import rumps
-                    rumps.alert(title="TurboSync Startup Error", message=error_msg)
-                except Exception as alert_e:
-                    logging.error(f"Failed to show rumps alert: {alert_e}")
-                    print(f"ERROR: {error_msg}", file=sys.stderr) # Fallback print
+
+            # Ensure the configuration directory exists
+            config_dir_ok = ensure_config_dir()
+            if not config_dir_ok:
+                # If the config directory cannot be created/accessed, we cannot proceed.
+                # ensure_config_dir already logs and shows an alert.
                 sys.exit(1) # Exit the application
 
-            # --- Configuration Loading is now handled solely by menubar.py ---
-            # Remove the redundant load_dotenv call here.
+            # --- Configuration Loading and validation is now handled solely by menubar.py ---
             # logging.debug(f"Skipping load_dotenv in main.py as menubar.py handles it.")
 
             # Check dependencies

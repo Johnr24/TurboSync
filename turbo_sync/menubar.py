@@ -19,9 +19,9 @@ from collections import OrderedDict # To maintain setting order
 # from PySide6.QtCore import Qt, Slot
 
 # Renamed perform_sync to update_syncthing_configuration
-from turbo_sync.sync import update_syncthing_configuration, load_config, find_livework_dirs
+# Import necessary functions and constants
+from turbo_sync.sync import update_syncthing_configuration, load_config, find_livework_dirs, DEFAULT_CONFIG
 from turbo_sync.watcher import FileWatcher, is_fswatch_available, get_fswatch_config # Absolute import
-# import multiprocessing # Import multiprocessing for Queue and Manager # Removed
 import textwrap # For formatting long messages
 import atexit # Import atexit for cleanup
 
@@ -210,54 +210,74 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
     def setup_file_watcher(self):
         """Set up the file watcher based on config"""
-        logging.debug("Setting up file watcher")
-        fswatch_config = get_fswatch_config()
-        self.watch_enabled = fswatch_config['watch_enabled']
+        logging.debug("Setting up file watcher...")
+        # Ensure config is loaded and valid before proceeding
+        if not self.config or not self.config.get('is_valid'):
+            logging.warning("Skipping file watcher setup: Configuration invalid or missing.")
+            self._stop_file_watcher() # Ensure it's stopped if it was running
+            self.watch_toggle.state = False
+            self.watch_enabled = False
+            self.watch_toggle.set_callback(None) # Disable toggle if config invalid
+            return
 
-        # Update menu item state
+        # Config is valid, proceed with setup based on config values
+        self.watch_enabled = self.config.get('watch_local_files', False)
+        local_dir_to_watch = self.config.get('local_dir')
+        watch_delay = self.config.get('watch_delay_seconds', 2)
+
+        # Update menu item state and ensure callback is set
         self.watch_toggle.state = self.watch_enabled
+        self.watch_toggle.set_callback(self.toggle_file_watching) # Ensure callback is active
 
-        # Only start watcher if fswatch is available and enabled
-        if self.watch_enabled and is_fswatch_available():
+        # Stop existing watcher if running
+        self._stop_file_watcher()
+
+        # Only start watcher if enabled in config, fswatch is available, and local_dir is set
+        if self.watch_enabled and is_fswatch_available() and local_dir_to_watch:
             try:
-                logging.info(f"Starting file watcher for: {fswatch_config['local_dir']}")
+                logging.info(f"Starting file watcher for: {local_dir_to_watch}")
                 self.file_watcher = FileWatcher(
-                    fswatch_config['local_dir'],
+                    local_dir_to_watch,
                     self.on_files_changed,
-                    fswatch_config['watch_delay']
+                    watch_delay
                 )
                 if self.file_watcher.start():
-                    logging.info("File watcher started successfully")
-                    rumps.notification( # Reverted to rumps.notification
-                        "TurboSync",
-                        "File Watcher Started",
-                        f"Watching {fswatch_config['local_dir']} for changes",
-                        sound=False
-                    )
+                    logging.info("File watcher started successfully.")
+                    # Optional: Notify user watcher started
+                    # rumps.notification("TurboSync", "File Watcher Started", f"Watching {local_dir_to_watch}", sound=False)
                 else:
-                    logging.error("Failed to start file watcher")
+                    logging.error("Failed to start file watcher process.")
+                    self.watch_toggle.state = False # Reflect failure in UI
+                    self.watch_enabled = False
             except Exception as e:
-                logging.error(f"Error starting file watcher: {e}")
-                rumps.notification( # Reverted to rumps.notification
-                    "TurboSync",
-                    "File Watcher Error",
-                    f"Could not start file watcher: {str(e)}",
-                    sound=True
-                )
+                logging.error(f"Error initializing or starting file watcher: {e}")
+                rumps.notification("TurboSync", "File Watcher Error", f"Could not start watcher: {str(e)}", sound=True)
                 self.watch_toggle.state = False
                 self.watch_enabled = False
         elif self.watch_enabled and not is_fswatch_available():
-            logging.warning("fswatch not available but file watching is enabled")
-            rumps.notification( # Reverted to rumps.notification
-                "TurboSync",
-                "fswatch Not Found",
-                "Please install fswatch to enable file watching: brew install fswatch",
-                sound=True
-            )
+            logging.warning("fswatch not available but file watching is enabled in config.")
+            rumps.notification("TurboSync", "fswatch Not Found", "Install fswatch for file watching: brew install fswatch", sound=True)
+            self.watch_toggle.state = False # Cannot enable
+            self.watch_enabled = False
+        elif self.watch_enabled and not local_dir_to_watch:
+             logging.warning("File watching enabled but LOCAL_DIR is not set in config.")
+             self.watch_toggle.state = False # Cannot enable
+             self.watch_enabled = False
+        else:
+            logging.info("File watching is disabled in configuration.")
             self.watch_toggle.state = False
             self.watch_enabled = False
-        else:
-            logging.debug("File watching is disabled")
+
+    def _stop_file_watcher(self):
+        """Stops the file watcher if it's running."""
+        if self.file_watcher:
+            logging.info("Stopping file watcher...")
+            try:
+                self.file_watcher.stop()
+                logging.info("File watcher stopped.")
+            except Exception as e:
+                logging.error(f"Error stopping file watcher: {e}")
+            self.file_watcher = None
 
     def on_files_changed(self):
         """Callback for when files change (likely triggers config update)"""
@@ -404,11 +424,17 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
         # Restore status title or trigger immediate poll?
         # Triggering a poll is better as the config change might affect status
-        self.status_item.title = original_status_title # Restore briefly
-        self._poll_syncthing_status() # Trigger immediate poll to reflect changes
+        # Only poll if config is valid and API client exists
+        if self.config.get('is_valid') and self.syncthing_api_client:
+             self.status_item.title = original_status_title # Restore briefly while polling
+             self._poll_syncthing_status() # Trigger immediate poll to reflect changes
+        elif not self.config.get('is_valid'):
+             self.status_item.title = "Status: Configuration Required" # Reset to config required status
+        else:
+             self.status_item.title = "Status: Syncthing Stopped/Error" # Fallback status
 
-        # Re-enable the "Update Syncthing Config" menu item if it was disabled
-        # update_item = self.menu.get("Update Syncthing Config") # Get by key/title
+        # Re-enable the "Update Syncthing Config" menu item if it was disabled AND config is valid
+        update_item = self.menu.get("Update Syncthing Config") # Get by key/title
         # if update_item and update_item.callback is None:
         #    update_item.set_callback(self.update_syncthing_config_task)
 
@@ -419,14 +445,17 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
     # --- Syncthing Status Polling ---
     def _start_status_poll_timer(self, interval=5): # Poll every 5 seconds
         """Starts the timer to periodically poll Syncthing status."""
-        if self.status_poll_timer is None and self.syncthing_api_client:
-            logger.info(f"Starting Syncthing status poll timer (interval: {interval}s).")
-            self.status_poll_timer = rumps.Timer(self._poll_syncthing_status, interval)
-            self.status_poll_timer.start()
-        elif self.syncthing_api_client is None:
-             logger.warning("Cannot start status poll timer: API client not initialized.")
+        # Only start if config is valid and API client exists
+        if self.config.get('is_valid') and self.syncthing_api_client:
+            if self.status_poll_timer is None:
+                logger.info(f"Starting Syncthing status poll timer (interval: {interval}s).")
+                self.status_poll_timer = rumps.Timer(self._poll_syncthing_status, interval)
+                self.status_poll_timer.start()
+            else:
+                logger.debug("Status poll timer already running.")
         else:
-            logger.debug("Status poll timer already running.")
+             logger.warning("Cannot start status poll timer: Config invalid or API client not initialized.")
+             self._stop_status_poll_timer() # Ensure it's stopped if conditions aren't met
 
     def _stop_status_poll_timer(self):
         """Stops the Syncthing status poll timer."""
@@ -486,11 +515,32 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
     # --- End Syncthing Status Polling ---
 
     # --- Update scheduled task ---
+    # --- Scheduler Control ---
+    def _start_scheduler_thread(self):
+        """Starts the background scheduler thread if not already running."""
+        if self.scheduler_thread is None or not self.scheduler_thread.is_alive():
+            self.scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+            self.scheduler_thread.start()
+            logging.info("Scheduler thread started.")
+        else:
+            logging.debug("Scheduler thread already running.")
+
+    def _stop_scheduler_thread(self):
+        """Signals the scheduler thread to stop (implementation depends on run_scheduler)."""
+        # For the current run_scheduler, stopping the thread isn't clean.
+        # We rely on daemon=True for exit. If cleaner stop is needed, run_scheduler needs modification.
+        logging.info("Stopping scheduler thread (via daemon exit).")
+        # If run_scheduler had a stop event: threading.Event().set()
+        self.scheduler_thread = None # Clear reference
+
     def scheduled_config_update(self):
         """Run the scheduled Syncthing configuration update"""
-        logging.info("Scheduled Syncthing configuration update triggered.")
-        # Call the task handler directly
-        self.update_syncthing_config_task()
+        # Check if config is valid before running
+        if self.config and self.config.get('is_valid'):
+            logging.info("Scheduled Syncthing configuration update triggered.")
+            self.update_syncthing_config_task()
+        else:
+            logging.debug("Skipping scheduled config update: Configuration invalid.")
 
     @rumps.clicked("View Logs") # Keep decorator
     def view_logs(self, _):
@@ -612,82 +662,84 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             except Exception as e:
                  logging.error(f"Error calling ensure_env_file: {e}")
                  return {}
-            # For simplicity here, we'll just return defaults if it's missing
-            # A more robust solution might call ensure_env_file from main.py
-            return {}
+            # Return defaults if file doesn't exist, so dialog shows defaults
+            logging.warning(f"User settings file not found at {USER_ENV_PATH}. Providing defaults to dialog.")
+            # Return a copy of the default config dictionary
+            return DEFAULT_CONFIG.copy()
         try:
-            return dotenv_values(USER_ENV_PATH)
+            # Load using dotenv_values which returns a dict
+            loaded_settings = dotenv_values(USER_ENV_PATH)
+            # Combine with defaults to ensure all keys are present for the dialog
+            combined_settings = DEFAULT_CONFIG.copy()
+            combined_settings.update(loaded_settings) # Override defaults with loaded values
+            return combined_settings
         except Exception as e:
             logging.error(f"Error reading settings file {USER_ENV_PATH}: {e}")
-            return {}
+            return DEFAULT_CONFIG.copy() # Return defaults on error
 
-    def _save_settings(self, new_settings):
-        """Saves the settings back to the user's .env file."""
-        logging.info(f"Saving settings to {USER_ENV_PATH}")
+    def _save_settings_internal(self, settings_to_save):
+        """Internal helper to save specific key-value pairs to the .env file."""
+        logging.info(f"Saving specific settings to {USER_ENV_PATH}: {list(settings_to_save.keys())}")
         try:
-            # Ensure the directory exists
+            # Ensure the directory exists (redundant if ensure_config_dir ran, but safe)
             os.makedirs(USER_CONFIG_DIR, exist_ok=True)
-            # Use set_key to update or add values in the .env file
-            # This preserves comments and structure better than rewriting
-            for key, value in new_settings.items():
-                 # Ensure value is a string for set_key
-                 str_value = str(value) if value is not None else ''
-                 set_key(USER_ENV_PATH, key, str_value, quote_mode="never")
-            logging.info("Settings saved successfully.")
-
-            # Reload config in the running app
-            logging.info(f"Reloading configuration after save using path: {USER_ENV_PATH}")
-            self.config = load_config(dotenv_path=USER_ENV_PATH) # Pass the path
-            if not self.config: # load_config might return None or raise error handled below
-                 raise ValueError("load_config failed to return a valid configuration after save.")
-            logging.info(f"New sync interval: {self.config['sync_interval']} minutes")
-
-            # Reschedule the config update job
-            schedule.clear()
-            schedule.every(self.config['sync_interval']).minutes.do(self.scheduled_config_update)
-            logging.info("Rescheduled Syncthing config update job.")
-
-            # Restart file watcher if settings changed (path, delay, or enabled status)
-            # Compare new watch setting with current state
-            new_watch_enabled = str(new_settings.get('WATCH_LOCAL_FILES', 'false')).lower() == 'true'
-            if new_watch_enabled != self.watch_enabled:
-                 logging.info(f"Watch setting changed to {new_watch_enabled}. Toggling watcher.")
-                 # Use the existing toggle logic but force the state
-                 self.watch_toggle.state = not new_watch_enabled # Set to opposite so toggle works
-                 self.toggle_file_watching(self.watch_toggle)
-            elif self.watch_enabled:
-                 # If watch enabled and path/delay changed, restart watcher
-                 fswatch_config = get_fswatch_config()
-                 new_local_dir = new_settings.get('LOCAL_DIR', '')
-                 new_delay = int(new_settings.get('WATCH_DELAY_SECONDS', 2))
-                 if (fswatch_config['local_dir'] != new_local_dir or
-                     fswatch_config['watch_delay'] != new_delay):
-                     logging.info("Watcher config changed. Restarting watcher.")
-                     if self.file_watcher:
-                         self.file_watcher.stop()
-                     self.setup_file_watcher() # Re-setup with new config
- 
-            # --- Handle Syncthing Restart if Needed ---
-            # Check if API address or key changed, potentially restart daemon
-            self._check_restart_syncthing_daemon(new_settings)
-            # Re-initialize API client after potential restart or key change
-            self._reinitialize_api_client(new_settings)
-            # Ensure polling timer is running if API client is now valid
-            self._start_status_poll_timer()
-            # --- Handle Start at Login ---
-            start_at_login = str(new_settings.get('START_AT_LOGIN', 'false')).lower() == 'true'
-            self._set_login_item(start_at_login)
-            # --- End Handle Start at Login ---
-
+            # Use set_key - it creates the file if it doesn't exist
+            for key, value in settings_to_save.items():
+                str_value = str(value) if value is not None else ''
+                # Use quote_mode='never' unless value contains spaces or special chars?
+                # For simplicity, let's try 'never' first. If issues arise, adjust.
+                set_key(USER_ENV_PATH, key, str_value, quote_mode="never") # Creates/updates file
+            logging.info(f"Successfully saved {len(settings_to_save)} key(s) to {USER_ENV_PATH}")
             return True
         except Exception as e:
             logging.exception(f"Error saving settings to {USER_ENV_PATH}: {e}")
             rumps.notification("TurboSync Error", "Save Failed", f"Could not save settings: {e}")
             return False
 
+    def _save_settings(self, new_settings):
+        """Saves all settings from the dialog back to the user's .env file and re-initializes."""
+        logging.info(f"Saving all settings from dialog to {USER_ENV_PATH}")
+        if self._save_settings_internal(new_settings):
+            logging.info("Settings saved successfully. Re-initializing application state...")
+            # --- Re-initialize based on the new settings ---
+            # This will reload config, check validity, and start/stop/reconfigure services
+            self._load_and_initialize()
+            # --- End Re-initialization ---
+
+            # --- Handle Start at Login (after re-initialization ensures config is loaded) ---
+            if self.config and self.config.get('is_valid'): # Check validity again after reload
+                 start_at_login = self.config.get('start_at_login', False)
+                 self._set_login_item(start_at_login)
+            else:
+                 logging.warning("Cannot set login item status: Configuration is invalid after save.")
+            # --- End Handle Start at Login ---
+
+            return True
+        else:
+            # _save_settings_internal already showed notification
+            return False
+
     def _check_restart_syncthing_daemon(self, new_settings):
-        """Checks if Syncthing daemon needs restart based on settings changes."""
-        old_api_addr = self.config.get('SYNCTHING_LISTEN_ADDRESS', DEFAULT_SYNCTHING_API_ADDRESS)
+        """Checks if Syncthing daemon needs restart based on settings changes.
+           Called internally by _load_and_initialize after config reload."""
+        # This logic is now effectively handled within _load_and_initialize
+        # by stopping the old daemon (if any) and starting a new one if config is valid.
+        # We might need finer control if only specific settings require a restart vs just API client re-init.
+        # For now, the simpler approach in _load_and_initialize covers the main cases.
+        logging.debug("Syncthing daemon restart check is handled by _load_and_initialize.")
+        pass # Keep the method signature for now if needed later
+
+    def _reinitialize_api_client(self, new_settings):
+        """Re-initializes the API client after settings changes.
+           Called internally by _load_and_initialize."""
+        # This logic is now handled by _initialize_api_client called from _load_and_initialize
+        logging.debug("API client re-initialization is handled by _initialize_api_client.")
+        pass # Keep the method signature for now if needed later
+
+# --- Removed old @rumps.clicked("Settings") and show_settings_dialog method ---
+
+
+# --- Update TurboSyncMenuBar ---
         new_api_addr = new_settings.get('SYNCTHING_LISTEN_ADDRESS', DEFAULT_SYNCTHING_API_ADDRESS)
         # Add checks for other critical daemon settings if they become configurable (e.g., protocol port)
 
