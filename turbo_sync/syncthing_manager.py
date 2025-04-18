@@ -168,7 +168,7 @@ def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, lo
         f"--home={config_dir}",
         "--no-browser",
         f"--gui-address={gui_address}", # Use separate GUI address
-        f"--listen={api_address}",      # Explicitly set API listen address
+        # f"--listen={api_address}",      # Removed - Caused errors with Syncthing v1.29.5
         f"--logfile={log_file}",
         "--log-max-old-files=3"
     ]
