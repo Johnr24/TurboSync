@@ -317,8 +317,8 @@ class SyncthingApiClient:
         """Update the Syncthing configuration."""
         # Note: This replaces the entire config. Use with caution.
         # Consider using specific endpoints for adding/removing devices/folders if needed.
-        logger.warning("Attempting to update entire Syncthing config.")
-        return self._request('POST', '/config', json=config_data)
+        logger.warning("Attempting to update entire Syncthing config using PUT.")
+        return self._request('PUT', '/config', json=config_data) # Changed method to PUT
 
     def get_folder_status(self, folder_id):
         """Get status for a specific folder."""
