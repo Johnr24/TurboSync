@@ -115,7 +115,8 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
            self.watch_toggle,      # Insert the MenuItem object
             "Settings",
             None,                   # Separator
-            # Quit item added by rumps automatically
+            # Replace default Quit with custom one for cleanup
+            rumps.MenuItem("Quit TurboSync", callback=self.quit_app),
             rumps.MenuItem("Open Sync Status Dashboard", callback=self.show_status_panel) # Renamed here
         ]
         self.menu = menu_items      # Assign the final list to self.menu
@@ -136,6 +137,18 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
             # Set up file watcher if enabled
             self.setup_file_watcher()
+
+            # --- Start Syncthing Daemon ---
+            logging.info("Attempting to start Syncthing daemon...")
+            # TODO: Get API address from config if customized
+            self.syncthing_process, error_msg = start_syncthing_daemon()
+            if not self.syncthing_process:
+                logging.error(f"Failed to start Syncthing daemon: {error_msg}")
+                rumps.notification("TurboSync Error", "Syncthing Failed", f"Could not start Syncthing: {error_msg}")
+            else:
+                logging.info("Syncthing daemon started.")
+                # Register cleanup function
+                atexit.register(self.cleanup_syncthing)
 
         except Exception as e:
             logging.error(f"Error loading configuration: {e}")
@@ -697,8 +710,20 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             rumps.notification("TurboSync Error", "Settings Error", f"Could not prepare settings: {e}")
 
 
-    # Removed custom quit_app method and decorator. Relying entirely on default rumps Quit button.
-    # The default Quit button should call rumps.quit_application()
+    # --- Custom Quit Handler ---
+    def quit_app(self, sender=None):
+        """Stops Syncthing daemon and then quits the application."""
+        logging.info("Quit TurboSync requested.")
+        self.cleanup_syncthing() # Call cleanup explicitly
+        logging.info("Quitting rumps application.")
+        rumps.quit_application()
+
+    def cleanup_syncthing(self):
+        """Stops the Syncthing daemon if it's running."""
+        logging.info("Running Syncthing cleanup...")
+        if self.syncthing_process:
+            stop_syncthing_daemon(self.syncthing_process)
+            self.syncthing_process = None # Clear the reference
 
     # --- Status Panel Methods ---
 
