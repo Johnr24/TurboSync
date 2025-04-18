@@ -370,89 +370,104 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
     def _initialize_api_clients(self):
         """Initializes the Syncthing API clients for both instances, only if the corresponding daemon process is running."""
-        # Reset clients first
+        logger.info("Attempting to initialize API clients...")
         self.api_client_source = None
         self.api_client_dest = None
+        self._stop_status_poll_timer() # Stop polling while initializing
 
         if not self.config or not self.config.get('is_valid'):
             logging.warning("Cannot initialize API clients: Configuration invalid.")
-            self._stop_status_poll_timer()
             return
 
-            self._stop_status_poll_timer() # Stop polling while initializing
-            return
-
-        # --- Initialize Source Client (only if process is running) ---
-        # api_addr_source = self.config.get('syncthing_api_address_source') # <-- No longer used for client init
+        # --- Initialize Source Client ---
         gui_addr_source = self.config.get('syncthing_gui_address_source') # <-- Use GUI address
-        if self.syncthing_process_source and self.syncthing_process_source.poll() is None:
-            logger.info("Source Syncthing process is running. Attempting to initialize API client...")
+        source_state = self.syncthing_process_source
+
+        if source_state is None:
+            logger.warning("Source Syncthing process was not started or detected. Skipping API client initialization.")
+        elif source_state == 'already_running':
+            logger.info("Source Syncthing process was detected as already running. Attempting to initialize API client...")
+            # Proceed with initialization logic below
+        elif isinstance(source_state, subprocess.Popen):
+            if source_state.poll() is None:
+                logger.info("Source Syncthing process (started by TurboSync) is running. Attempting to initialize API client...")
+                # Proceed with initialization logic below
+            else:
+                logger.warning(f"Source Syncthing process (PID: {source_state.pid}) was started but has stopped (exit code: {source_state.poll()}). Skipping API client initialization.")
+                self.syncthing_process_source = None # Clear stale process
+                source_state = None # Update state to prevent initialization attempt
+        else:
+            logger.error(f"Unexpected state for source Syncthing process: {source_state}. Skipping API client initialization.")
+            self.api_client_source = None
+            source_state = None # Update state to prevent initialization attempt
+
+        # Attempt initialization only if state is not None
+        if source_state is not None:
             api_key_source = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_SOURCE)
-            # Use GUI address for client initialization (reverted)
-            # api_addr_source = self.config.get('syncthing_api_address_source') # <-- No longer used for client init
-            if api_key_source and gui_addr_source: # <-- Reverted to check gui_addr_source
+            if api_key_source and gui_addr_source:
                 try:
-                    self.api_client_source = SyncthingApiClient(api_key=api_key_source, address=gui_addr_source) # <-- Reverted to use gui_addr_source
-                    logging.info(f"Source Syncthing API client initialized (using GUI address: {gui_addr_source}). Pinging...") # <-- Restore "Pinging..."
-                    # --- Restore Immediate Ping Check ---
-                    time.sleep(2) # Add short delay before ping
-                    if self.api_client_source.ping(): # Restore ping check
+                    self.api_client_source = SyncthingApiClient(api_key=api_key_source, address=gui_addr_source)
+                    logging.info(f"Source Syncthing API client object created (using GUI address: {gui_addr_source}). Pinging...")
+                    time.sleep(2) # Short delay before ping
+                    if self.api_client_source.ping():
                         logging.info("Source API ping successful.")
                     else:
                         logging.error("Source API ping FAILED. Check API key and Syncthing instance.")
-                        rumps.notification("TurboSync Error", "Source API Ping Failed", "Could not verify connection to source Syncthing.")
-                        self.api_client_source = None # Invalidate client if ping fails
-                    # --- End Restore Ping Check ---
+                        rumps.notification("TurboSync Error", "Source API Ping Failed", "Could not verify connection.")
+                        self.api_client_source = None # Invalidate client
                 except Exception as api_e:
-                    logging.error(f"Failed to initialize Source Syncthing API client: {api_e}") # Removed "or ping"
-                    rumps.notification("TurboSync Error", "Source API Error", f"Could not connect: {api_e}") # Removed "/ping"
+                    logging.error(f"Failed to initialize/ping Source Syncthing API client: {api_e}")
+                    rumps.notification("TurboSync Error", "Source API Error", f"Could not connect/ping: {api_e}")
                     self.api_client_source = None
-            else:
-                if not api_key_source:
-                    logging.error("Source Syncthing API key not found in config.xml.")
-                    rumps.notification("TurboSync Warning", "Source API Key Missing", "Cannot connect to source Syncthing.")
-                if not gui_addr_source: # <-- Reverted to check gui_addr_source
-                    logging.error("Source Syncthing GUI address missing in config.") # Log GUI address missing
+            else: # Handle missing key or address after confirming process should be running
+                if not api_key_source: logging.error("Source API key not found.")
+                if not gui_addr_source: logging.error("Source GUI address missing.")
                 self.api_client_source = None
-        else:
-            logging.warning("Source Syncthing process is not running. Skipping API client initialization.")
-            self.api_client_source = None
 
         # --- Initialize Destination Client (only if process is running) ---
-        # api_addr_dest = self.config.get('syncthing_api_address_dest') # <-- No longer used for client init
         gui_addr_dest = self.config.get('syncthing_gui_address_dest') # <-- Use GUI address
-        if self.syncthing_process_dest and self.syncthing_process_dest.poll() is None:
-            logger.info("Destination Syncthing process is running. Attempting to initialize API client...")
+        dest_state = self.syncthing_process_dest
+
+        if dest_state is None:
+            logger.warning("Destination Syncthing process was not started or detected. Skipping API client initialization.")
+        elif dest_state == 'already_running':
+            logger.info("Destination Syncthing process was detected as already running. Attempting to initialize API client...")
+            # Proceed with initialization logic below
+        elif isinstance(dest_state, subprocess.Popen):
+            if dest_state.poll() is None:
+                logger.info("Destination Syncthing process (started by TurboSync) is running. Attempting to initialize API client...")
+                # Proceed with initialization logic below
+            else:
+                logger.warning(f"Destination Syncthing process (PID: {dest_state.pid}) was started but has stopped (exit code: {dest_state.poll()}). Skipping API client initialization.")
+                self.syncthing_process_dest = None # Clear stale process
+                dest_state = None # Update state to prevent initialization attempt
+        else:
+            logger.error(f"Unexpected state for destination Syncthing process: {dest_state}. Skipping API client initialization.")
+            self.api_client_dest = None
+            dest_state = None # Update state to prevent initialization attempt
+
+        # Attempt initialization only if state is not None
+        if dest_state is not None:
             api_key_dest = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_DEST)
-            # Use GUI address for client initialization (reverted)
-            # api_addr_dest = self.config.get('syncthing_api_address_dest') # <-- No longer used for client init
-            if api_key_dest and gui_addr_dest: # <-- Reverted to check gui_addr_dest
+            if api_key_dest and gui_addr_dest:
                 try:
-                    self.api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=gui_addr_dest) # <-- Reverted to use gui_addr_dest
-                    logging.info(f"Destination Syncthing API client initialized (using GUI address: {gui_addr_dest}). Pinging...") # <-- Restore "Pinging..."
-                    # --- Restore Immediate Ping Check ---
-                    time.sleep(2) # Add short delay before ping
-                    if self.api_client_dest.ping(): # Restore ping check
+                    self.api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=gui_addr_dest)
+                    logging.info(f"Destination Syncthing API client object created (using GUI address: {gui_addr_dest}). Pinging...")
+                    time.sleep(2) # Short delay before ping
+                    if self.api_client_dest.ping():
                         logging.info("Destination API ping successful.")
                     else:
                         logging.error("Destination API ping FAILED. Check API key and Syncthing instance.")
-                        rumps.notification("TurboSync Error", "Dest API Ping Failed", "Could not verify connection to destination Syncthing.")
-                        self.api_client_dest = None # Invalidate client if ping fails
-                    # --- End Restore Ping Check ---
+                        rumps.notification("TurboSync Error", "Dest API Ping Failed", "Could not verify connection.")
+                        self.api_client_dest = None # Invalidate client
                 except Exception as api_e:
-                    logging.error(f"Failed to initialize Destination Syncthing API client: {api_e}") # Removed "or ping"
-                    rumps.notification("TurboSync Error", "Dest API Error", f"Could not connect: {api_e}") # Removed "/ping"
+                    logging.error(f"Failed to initialize/ping Destination Syncthing API client: {api_e}")
+                    rumps.notification("TurboSync Error", "Dest API Error", f"Could not connect/ping: {api_e}")
                     self.api_client_dest = None
-            else:
-                if not api_key_dest:
-                    logging.error("Destination Syncthing API key not found in config.xml.")
-                    rumps.notification("TurboSync Warning", "Dest API Key Missing", "Cannot connect to destination Syncthing.")
-                if not gui_addr_dest: # <-- Reverted to check gui_addr_dest
-                    logging.error("Destination Syncthing GUI address missing in config.") # Log GUI address missing
+            else: # Handle missing key or address after confirming process should be running
+                if not api_key_dest: logging.error("Destination API key not found.")
+                if not gui_addr_dest: logging.error("Destination GUI address missing.")
                 self.api_client_dest = None
-        else:
-            logging.warning("Destination Syncthing process is not running. Skipping API client initialization.")
-            self.api_client_dest = None
 
         # --- Start Polling Timer (only if BOTH clients initialized AND pinged successfully) ---
         if self.api_client_source and self.api_client_dest:
