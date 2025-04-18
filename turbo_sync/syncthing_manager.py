@@ -202,7 +202,7 @@ def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, lo
         logger.info(f"Syncthing daemon ({instance_id}) process created (PID: {process.pid}). Waiting briefly...")
 
         # Wait a short time to see if it exits immediately
-        time.sleep(2.0) # Increased sleep slightly
+        time.sleep(3.0) # Increased sleep slightly
         exit_code = process.poll()
 
         if exit_code is not None:
@@ -461,7 +461,7 @@ class SyncthingApiClient:
 
     # Add more static helpers as needed: add_device_to_config, share_folder_in_config, remove_folder_from_config
 
-def get_api_key_from_config(config_dir, retries=15, delay=0.5): # Increased retries
+def get_api_key_from_config(config_dir, retries=15, delay=0.75): # Increased retries and delay
     """
     Reads the API key directly from Syncthing's config.xml.
     Retries for a short period to allow Syncthing time to generate the file.
