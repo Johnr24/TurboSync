@@ -412,6 +412,30 @@ class SyncthingApiClient:
         logger.info(f"Prepared folder '{folder_id}' ({local_path}) for addition to config.")
 
     @staticmethod
+    def add_device_to_config(config_data, device_id, device_name):
+        """Adds a device definition to a config dictionary (does not apply it)."""
+        if 'devices' not in config_data:
+            config_data['devices'] = []
+
+        # Check if device already exists
+        for device in config_data['devices']:
+            if device.get('deviceID') == device_id:
+                logger.debug(f"Device '{device_id}' ({device_name}) already exists in config.")
+                # Optionally update name or other properties here if needed
+                # device['name'] = device_name
+                return # Exit if already exists
+
+        # Add new device if not found
+        config_data['devices'].append({
+            "deviceID": device_id,
+            "name": device_name,
+            # Add other necessary default device settings here (e.g., introducer=False)
+            "introducer": False,
+            "autoAcceptFolders": False, # Be explicit about security settings
+        })
+        logger.info(f"Prepared device '{device_id}' ({device_name}) for addition to config.")
+
+    @staticmethod
     def parse_folder_status(status_data):
         """Parses the raw folder status dict into a more usable format."""
         if not status_data:
