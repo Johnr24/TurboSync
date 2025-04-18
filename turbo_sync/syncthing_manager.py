@@ -278,7 +278,7 @@ class SyncthingApiClient:
              else:
                   self.base_url = address # Already includes /rest
 
-        self.headers = {'X-API-Key': self.api_key}
+        self.headers = {'Authorization': f'Bearer {self.api_key}'} # Use Authorization: Bearer header
         logger.info(f"Syncthing API Client initialized for base URL: {self.base_url}")
         # Test connection on init? Maybe not, do it lazily.
 
@@ -286,8 +286,8 @@ class SyncthingApiClient:
         """Internal helper to make API requests."""
         url = self.base_url + endpoint
         try:
-            # --- Add this logging line ---
-            logger.debug(f"Sending API request: {method} {url} with API Key: {self.headers.get('X-API-Key')}")
+            # Log the request without explicitly mentioning the header type, as it might change
+            logger.debug(f"Sending API request: {method} {url}")
             # --- End added line ---
             response = requests.request(
                 method,
