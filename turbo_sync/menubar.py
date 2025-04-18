@@ -1082,9 +1082,13 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         """Stops the Syncthing daemons if they are running."""
         self._stop_status_poll_timer() # Ensure timer is stopped
         logging.info("Running Syncthing cleanup for both instances...")
+        # Log the state before attempting to stop
+        logging.debug(f"Cleanup check: Source process state = {self.syncthing_process_source} (Type: {type(self.syncthing_process_source)})")
         if self.syncthing_process_source:
             stop_syncthing_daemon(self.syncthing_process_source)
             self.syncthing_process_source = None # Clear the reference
+        # Log the state before attempting to stop
+        logging.debug(f"Cleanup check: Destination process state = {self.syncthing_process_dest} (Type: {type(self.syncthing_process_dest)})")
         if self.syncthing_process_dest:
             stop_syncthing_daemon(self.syncthing_process_dest)
             self.syncthing_process_dest = None # Clear the reference
