@@ -197,10 +197,11 @@ def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, lo
 
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL, # Or subprocess.PIPE for debugging
-            stderr=subprocess.DEVNULL, # Or subprocess.PIPE for debugging
+            stdout=subprocess.DEVNULL, # Keep stdout ignored for now
+            stderr=subprocess.PIPE, # <-- CHANGE THIS LINE from subprocess.DEVNULL
             creationflags=creationflags,
-            start_new_session=start_new_session
+            start_new_session=start_new_session,
+            text=True # Add text=True to decode stderr automatically
         )
         logger.info(f"Syncthing daemon started successfully (PID: {process.pid}).")
         # Give it a moment to start up before trying to connect

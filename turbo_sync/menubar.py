@@ -193,10 +193,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         # Set up file watcher if enabled
         self.setup_file_watcher() # This handles enabling/disabling based on config
 
-        # Start Syncthing Daemons (plural)
+        # Start Syncthing Daemons (plural) - This will also initialize clients if successful
         self._start_syncthing_daemons_and_clients() # Updated for two instances
 
-        # Start status polling (will be handled by _initialize_api_clients if successful)
+        # Status polling is started within _initialize_api_clients if successful
 
         # Register cleanup function
         atexit.register(self.cleanup_syncthing)
@@ -230,18 +230,18 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.api_client_dest = None
 
     def _start_syncthing_daemons_and_clients(self):
-        """Generates initial configs, starts the TWO Syncthing daemons, and initializes their API clients."""
+        """Generates initial configs, starts the TWO Syncthing daemons, checks if they exited quickly,
+           and initializes their API clients if they are running."""
         if not self.config or not self.config.get('is_valid'):
             logging.warning("Cannot start Syncthing daemons: Configuration is invalid.")
             return
 
-        # Get Syncthing executable path once
-        from .syncthing_manager import get_syncthing_executable_path # Local import ok here
+        from .syncthing_manager import get_syncthing_executable_path
         syncthing_exe = get_syncthing_executable_path()
         if not syncthing_exe:
             logging.error("Syncthing executable not found. Cannot start daemons.")
             rumps.notification("TurboSync Error", "Syncthing Not Found", "Cannot start Syncthing.")
-            return # Cannot proceed without the executable
+            return
 
         # --- Start Source Instance ---
         if self.syncthing_process_source and self.syncthing_process_source.poll() is None:
@@ -252,27 +252,45 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             gui_addr_source = self.config.get('syncthing_gui_address_source')
             if not api_addr_source or not gui_addr_source:
                  logging.error("Source Syncthing API or GUI address missing in config.")
+                 self.syncthing_process_source = None # Ensure it's None
             else:
-                # 1. Generate config first
                 logging.info("Generating initial config for source instance...")
                 if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_SOURCE):
-                    # 2. Start the daemon
                     logging.info("Attempting to start Syncthing source daemon...")
-                    self.syncthing_process_source, error_msg = start_syncthing_daemon(
+                    process, error_msg = start_syncthing_daemon( # Capture process object
                         instance_id="source",
                         config_dir=SYNCTHING_CONFIG_DIR_SOURCE,
                         api_address=api_addr_source,
                         gui_address=gui_addr_source,
                         log_file=SYNCTHING_LOG_FILE_SOURCE
                     )
-                    if not self.syncthing_process_source:
-                        logging.error(f"Failed to start Syncthing source daemon: {error_msg}")
+                    if not process:
+                        logging.error(f"Failed to start Syncthing source daemon process: {error_msg}")
                         rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Could not start: {error_msg}")
+                        self.syncthing_process_source = None # Ensure it's None
                     else:
-                        logging.info(f"Syncthing source daemon started (PID: {self.syncthing_process_source.pid}).")
+                        # Check if the process exited quickly after the sleep in start_syncthing_daemon
+                        exit_code = process.poll()
+                        if exit_code is not None:
+                             stderr_output = "Could not read stderr."
+                             try:
+                                 # Read stderr (it's already decoded due to text=True)
+                                 stderr_output = process.stderr.read()
+                             except Exception as e:
+                                 logging.error(f"Error reading stderr from failed source process: {e}")
+
+                             logging.error(f"Syncthing source daemon (PID: {process.pid}) exited immediately with code {exit_code}.")
+                             logging.error(f"Syncthing source stderr:\n---\n{stderr_output}\n---")
+                             rumps.notification("TurboSync Error", "Syncthing Source Failed", f"Exited immediately (code {exit_code}). Check logs.")
+                             self.syncthing_process_source = None # Mark as failed
+                        else:
+                             # Process is still running after the initial sleep
+                             logging.info(f"Syncthing source daemon started successfully (PID: {process.pid}).")
+                             self.syncthing_process_source = process # Store the running process
                 else:
                     logging.error("Failed to generate initial config for source instance. Daemon not started.")
                     rumps.notification("TurboSync Error", "Syncthing Source Config Failed", "Could not generate initial config.")
+                    self.syncthing_process_source = None
 
         # --- Start Destination Instance ---
         if self.syncthing_process_dest and self.syncthing_process_dest.poll() is None:
@@ -283,35 +301,52 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             gui_addr_dest = self.config.get('syncthing_gui_address_dest')
             if not api_addr_dest or not gui_addr_dest:
                  logging.error("Destination Syncthing API or GUI address missing in config.")
+                 self.syncthing_process_dest = None # Ensure it's None
             else:
-                # 1. Generate config first
                 logging.info("Generating initial config for destination instance...")
                 if generate_syncthing_config(syncthing_exe, SYNCTHING_CONFIG_DIR_DEST):
-                    # 2. Start the daemon
                     logging.info("Attempting to start Syncthing destination daemon...")
-                    self.syncthing_process_dest, error_msg = start_syncthing_daemon(
+                    process, error_msg = start_syncthing_daemon( # Capture process object
                         instance_id="dest",
                         config_dir=SYNCTHING_CONFIG_DIR_DEST,
                         api_address=api_addr_dest,
                         gui_address=gui_addr_dest,
                         log_file=SYNCTHING_LOG_FILE_DEST
                     )
-                    if not self.syncthing_process_dest:
-                        logging.error(f"Failed to start Syncthing destination daemon: {error_msg}")
+                    if not process:
+                        logging.error(f"Failed to start Syncthing destination daemon process: {error_msg}")
                         rumps.notification("TurboSync Error", "Syncthing Dest Failed", f"Could not start: {error_msg}")
+                        self.syncthing_process_dest = None # Ensure it's None
                     else:
-                        logging.info(f"Syncthing destination daemon started (PID: {self.syncthing_process_dest.pid}).")
+                        # Check if the process exited quickly after the sleep in start_syncthing_daemon
+                        exit_code = process.poll()
+                        if exit_code is not None:
+                             stderr_output = "Could not read stderr."
+                             try:
+                                 # Read stderr (it's already decoded due to text=True)
+                                 stderr_output = process.stderr.read()
+                             except Exception as e:
+                                 logging.error(f"Error reading stderr from failed dest process: {e}")
+
+                             logging.error(f"Syncthing destination daemon (PID: {process.pid}) exited immediately with code {exit_code}.")
+                             logging.error(f"Syncthing destination stderr:\n---\n{stderr_output}\n---")
+                             rumps.notification("TurboSync Error", "Syncthing Dest Failed", f"Exited immediately (code {exit_code}). Check logs.")
+                             self.syncthing_process_dest = None # Mark as failed
+                        else:
+                             # Process is still running after the initial sleep
+                             logging.info(f"Syncthing destination daemon started successfully (PID: {process.pid}).")
+                             self.syncthing_process_dest = process # Store the running process
                 else:
                     logging.error("Failed to generate initial config for destination instance. Daemon not started.")
                     rumps.notification("TurboSync Error", "Syncthing Dest Config Failed", "Could not generate initial config.")
+                    self.syncthing_process_dest = None
 
-        # --- Initialize API Clients (if daemons started) ---
-        # This is called AFTER attempting to start the daemons.
-        # It will retrieve the API keys which should now exist thanks to --generate.
+        # --- Initialize API Clients (only if daemons are actually running) ---
+        # This is called AFTER attempting to start the daemons and checking they didn't exit immediately.
         self._initialize_api_clients()
 
     def _initialize_api_clients(self):
-        """Initializes the Syncthing API clients for both instances."""
+        """Initializes the Syncthing API clients for both instances, only if the corresponding daemon process is running."""
         if not self.config or not self.config.get('is_valid'):
             logging.warning("Cannot initialize API clients: Configuration invalid.")
             self.api_client_source = None
@@ -319,74 +354,55 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             self._stop_status_poll_timer()
             return
 
-        # --- Initialize Source Client ---
-        api_addr_source = self.config.get('syncthing_api_address_source')
-        api_key_source = None
-        # --- Add logging before the check ---
-        source_process_status = "Not Set"
-        source_poll_result = "N/A"
-        if self.syncthing_process_source:
-            source_process_status = "Set"
-            try:
-                source_poll_result = self.syncthing_process_source.poll()
-            except Exception as e:
-                 source_poll_result = f"Error polling: {e}"
-        logger.debug(f"Checking Source Syncthing process before API key retrieval: Process={source_process_status}, Poll={source_poll_result}")
-        # --- End added logging ---
-        if self.syncthing_process_source and self.syncthing_process_source.poll() is None:
-            logger.info("Attempting to retrieve API key from Source Syncthing config.xml...")
-            # time.sleep(1) # Removed - get_api_key_from_config now handles retries
-            api_key_source = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_SOURCE)
+            self._stop_status_poll_timer() # Stop polling while initializing
+            return
 
-        if api_key_source and api_addr_source:
-            try:
-                self.api_client_source = SyncthingApiClient(api_key=api_key_source, address=api_addr_source)
-                logging.info("Source Syncthing API client initialized successfully.")
-            except Exception as api_e:
-                logging.error(f"Failed to initialize Source Syncthing API client: {api_e}")
-                rumps.notification("TurboSync Error", "Source API Error", f"Could not connect: {api_e}")
+        # --- Initialize Source Client (only if process is running) ---
+        api_addr_source = self.config.get('syncthing_api_address_source')
+        if self.syncthing_process_source and self.syncthing_process_source.poll() is None:
+            logger.info("Source Syncthing process is running. Attempting to initialize API client...")
+            api_key_source = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_SOURCE)
+            if api_key_source and api_addr_source:
+                try:
+                    self.api_client_source = SyncthingApiClient(api_key=api_key_source, address=api_addr_source)
+                    logging.info("Source Syncthing API client initialized successfully.")
+                except Exception as api_e:
+                    logging.error(f"Failed to initialize Source Syncthing API client: {api_e}")
+                    rumps.notification("TurboSync Error", "Source API Error", f"Could not connect: {api_e}")
+                    self.api_client_source = None # Ensure it's None on error
+            else:
+                if not api_key_source:
+                    logging.error("Source Syncthing API key not found in config.xml.")
+                    rumps.notification("TurboSync Warning", "Source API Key Missing", "Cannot connect to source Syncthing.")
+                if not api_addr_source:
+                    logging.error("Source Syncthing API address missing in config.")
                 self.api_client_source = None
         else:
-            if not api_key_source:
-                logging.error("Source Syncthing API key not found in config.xml or daemon not running.")
-                rumps.notification("TurboSync Warning", "Source API Key Missing", "Cannot connect to source Syncthing.")
-            if not api_addr_source:
-                 logging.error("Source Syncthing API address missing in config.")
+            logging.warning("Source Syncthing process is not running. Skipping API client initialization.")
             self.api_client_source = None
 
-        # --- Initialize Destination Client ---
+        # --- Initialize Destination Client (only if process is running) ---
         api_addr_dest = self.config.get('syncthing_api_address_dest')
-        api_key_dest = None
-        # --- Add logging before the check ---
-        dest_process_status = "Not Set"
-        dest_poll_result = "N/A"
-        if self.syncthing_process_dest:
-            dest_process_status = "Set"
-            try:
-                dest_poll_result = self.syncthing_process_dest.poll()
-            except Exception as e:
-                 dest_poll_result = f"Error polling: {e}"
-        logger.debug(f"Checking Dest Syncthing process before API key retrieval: Process={dest_process_status}, Poll={dest_poll_result}")
-        # --- End added logging ---
         if self.syncthing_process_dest and self.syncthing_process_dest.poll() is None:
-            logger.info("Attempting to retrieve API key from Destination Syncthing config.xml...")
-            # time.sleep(1) # Removed - get_api_key_from_config now handles retries
+            logger.info("Destination Syncthing process is running. Attempting to initialize API client...")
             api_key_dest = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR_DEST)
-
-        if api_key_dest and api_addr_dest:
-            try:
-                self.api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=api_addr_dest)
-                logging.info("Destination Syncthing API client initialized successfully.")
-            except Exception as api_e:
-                logging.error(f"Failed to initialize Destination Syncthing API client: {api_e}")
-                rumps.notification("TurboSync Error", "Dest API Error", f"Could not connect: {api_e}")
+            if api_key_dest and api_addr_dest:
+                try:
+                    self.api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=api_addr_dest)
+                    logging.info("Destination Syncthing API client initialized successfully.")
+                except Exception as api_e:
+                    logging.error(f"Failed to initialize Destination Syncthing API client: {api_e}")
+                    rumps.notification("TurboSync Error", "Dest API Error", f"Could not connect: {api_e}")
+                    self.api_client_dest = None # Ensure it's None on error
+            else:
+                if not api_key_dest:
+                    logging.error("Destination Syncthing API key not found in config.xml.")
+                    rumps.notification("TurboSync Warning", "Dest API Key Missing", "Cannot connect to destination Syncthing.")
+                if not api_addr_dest:
+                    logging.error("Destination Syncthing API address missing in config.")
                 self.api_client_dest = None
         else:
-            if not api_key_dest:
-                logging.error("Destination Syncthing API key not found in config.xml or daemon not running.")
-                rumps.notification("TurboSync Warning", "Dest API Key Missing", "Cannot connect to destination Syncthing.")
-            if not api_addr_dest:
-                 logging.error("Destination Syncthing API address missing in config.")
+            logging.warning("Destination Syncthing process is not running. Skipping API client initialization.")
             self.api_client_dest = None
 
         # --- Start Polling Timer (only if BOTH clients initialized) ---
