@@ -147,26 +147,21 @@ QPushButton:pressed {
                 "USE_MOUNTED_VOLUME": ("Use Mounted Volume (instead of SSH):", QCheckBox, False),
                 "MOUNTED_VOLUME_PATH": ("Mounted Volume Path:", QLineEdit, ""),
             }),
-            ("Sync Options", {
-                "SYNC_INTERVAL": ("Sync Interval (minutes):", QSpinBox, 5), # Use QSpinBox
-                "ENABLE_PARALLEL_SYNC": ("Enable Parallel Sync:", QCheckBox, True),
-                "PARALLEL_PROCESSES": ("Parallel Processes:", QSpinBox, 4), # Use QSpinBox
+            ("Sync Options", { # Renamed from "Sync Options" to "Config Update Interval" or similar?
+                "SYNC_INTERVAL": ("Config Check Interval (minutes):", QSpinBox, 5), # Use QSpinBox, clarify purpose
+                # Removed ENABLE_PARALLEL_SYNC
+                # Removed PARALLEL_PROCESSES
             }),
-            ("Syncthing Daemon", { # New Group Box for Local Syncthing Daemon
-                "SYNCTHING_API_KEY": ("Syncthing API Key:", QLineEdit, ""), # Consider auto-generating/retrieving
-                "SYNCTHING_LISTEN_ADDRESS": ("Syncthing Listen Address:", QLineEdit, "127.0.0.1:8385"),
+            ("Syncthing Daemon", { # Group Box for Local Syncthing Daemon
+                "SYNCTHING_API_KEY": ("Local Syncthing API Key:", QLineEdit, ""), # Clarified label
+                "SYNCTHING_LISTEN_ADDRESS": ("Local Syncthing Listen Address:", QLineEdit, "127.0.0.1:8385"), # Clarified label
             }),
-            ("File Watching", {
-                "WATCH_LOCAL_FILES": ("Watch Local Files:", QCheckBox, True),
+            ("File Watching", { # Keep for triggering config updates?
+                "WATCH_LOCAL_FILES": ("Watch Local Files (for .livework changes):", QCheckBox, True), # Clarified purpose
                 "WATCH_DELAY_SECONDS": ("Watch Delay (seconds):", QSpinBox, 2), # Use QSpinBox
             }),
-            # --- Remove Rsync Group ---
-            # ("Rsync", { ... }), # This comment seems misplaced based on the diff keeping the Rsync group below
-            ("Rsync", { # Renamed Group Box
-                # Use QPlainTextEdit for multi-line options
-                "RSYNC_OPTIONS": ("Rsync Options:", QPlainTextEdit, "-avz --progress --delete"), # Updated key, label, and default
-            }),
-            ("Application Behavior", { # New Group Box
+            # --- Removed Rsync Group ---
+            ("Application Behavior", {
                 "START_AT_LOGIN": ("Start TurboSync at Login:", QCheckBox, False),
             }),
         ])

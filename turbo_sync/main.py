@@ -182,13 +182,25 @@ def setup_icon():
              return None # Indicate icon is missing
 
 def check_dependencies():
-    """Check if required external dependencies are available (currently only fswatch if enabled)"""
-    # Log message adjusted
-    logging.debug("Checking dependencies (fswatch if enabled)...")
-    # rsync check removed as Syncthing is now used
+    """Check if required external dependencies are available (fswatch if enabled, Syncthing)"""
+    logging.debug("Checking dependencies (Syncthing, fswatch if enabled)...")
+
+    # Check for Syncthing (essential)
+    from .syncthing_manager import get_syncthing_executable_path
+    if not get_syncthing_executable_path():
+         logging.error("Syncthing executable not found. TurboSync cannot manage Syncthing.")
+         # Show notification?
+         import rumps
+         rumps.notification(
+             "TurboSync Error",
+             "Syncthing Not Found",
+             "Could not find the bundled Syncthing executable. Please rebuild the application.",
+             sound=True
+         )
+         return False # Critical dependency missing
 
     # Check if fswatch is available if file watching is enabled
-    fswatch_config = get_fswatch_config() # Assuming get_fswatch_config is defined elsewhere
+    fswatch_config = get_fswatch_config()
     if fswatch_config['watch_enabled']:
         if is_fswatch_available():
             try:

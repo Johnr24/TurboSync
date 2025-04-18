@@ -18,7 +18,8 @@ from collections import OrderedDict # To maintain setting order
 # from PySide6.QtWidgets import QApplication, QDialog, ...
 # from PySide6.QtCore import Qt, Slot
 
-from turbo_sync.sync import perform_sync, load_config, find_livework_dirs # Absolute import, added find_livework_dirs
+# Renamed perform_sync to update_syncthing_configuration
+from turbo_sync.sync import update_syncthing_configuration, load_config, find_livework_dirs
 from turbo_sync.watcher import FileWatcher, is_fswatch_available, get_fswatch_config # Absolute import
 # import multiprocessing # Import multiprocessing for Queue and Manager # Removed
 import textwrap # For formatting long messages
@@ -82,48 +83,41 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
         logging.debug("Setting up menu items")
         # State variables (define before menu items that might use them)
-        self.is_syncing = False # Use this instead of self.syncing
-        self.sync_thread = None
+        # self.is_syncing = False # Removed - Syncthing runs continuously
+        self.config_update_thread = None # Thread for running config updates
+        self.is_updating_config = False # Flag to prevent concurrent updates
         # self.status_item = None # Defined below
-        self.last_sync_status = "Never synced"
+        self.last_config_update_status = "Never updated"
         self.file_watcher = None
         self.watch_enabled = False # Will be updated by setup_file_watcher
         self.syncthing_process = None # Add state for Syncthing process
-        self.last_sync_results = {} # Store detailed results {path: {'success': bool, 'synced_files': [], 'error': 'msg', 'error_type': 'optional_str'}}
-        # self.active_sync_progress = {} # Store current progress {path: percentage} # Removed
-        # --- Removed progress queue/timer ---
-        # self.manager = multiprocessing.Manager()
-        # self.progress_queue = self.manager.Queue() # Queue for sync progress
-        # self.progress_timer = None # Timer to check the queue
+        # self.last_sync_results = {} # Removed - Status comes from polling
         self.status_panel = None # Changed from self.status_panel_window
-        # self.sync_emitter = SyncSignalEmitter() # Removed emitter
         self.syncthing_api_client = None # Add state for API client
         self.status_poll_timer = None # Timer for polling Syncthing status
 
         # --- Define Items Needing State Management First ---
-        self.status_item = rumps.MenuItem(f"Status: {self.last_sync_status}")
+        # Initial status reflects Syncthing state, not last rsync
+        self.status_item = rumps.MenuItem("Status: Initializing...")
         self.watch_toggle = rumps.MenuItem("Enable File Watching") # Title matches decorator
-        # Synced projects submenu removed
 
         # --- Define Complete Menu Structure ---
         # Removed self.status_panel_item definition
         # Construct the list with MenuItem objects included directly
         menu_items = [
             self.status_item,       # Insert the MenuItem object
-            "Sync Now",
-            # Removed self.status_panel_item from list
-           "View Logs",
-           # Synced projects submenu removed
-           None,                   # Separator
+            rumps.MenuItem("Update Syncthing Config", callback=self.update_syncthing_config_task), # Renamed "Sync Now"
+            rumps.MenuItem("Open Sync Status Dashboard", callback=self.show_status_panel), # Keep this
+            "View Logs",
+            None,                   # Separator
            self.watch_toggle,      # Insert the MenuItem object
             "Settings",
             None,                   # Separator
             # Replace default Quit with custom one for cleanup
             rumps.MenuItem("Quit TurboSync", callback=self.quit_app),
-            rumps.MenuItem("Open Sync Status Dashboard", callback=self.show_status_panel) # Renamed here
+            # Removed duplicate "Open Sync Status Dashboard"
         ]
         self.menu = menu_items      # Assign the final list to self.menu
-        # Removed self.menu.append(...) line
 
         # Synced projects submenu removed
 
@@ -133,12 +127,11 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             self.config = load_config(dotenv_path=USER_ENV_PATH) # Pass the path
             if not self.config: # load_config might return None or raise error handled below
                 raise ValueError("load_config failed to return a valid configuration.")
-            logging.info(f"Configuration loaded, sync interval: {self.config['sync_interval']} minutes")
-            schedule.every(self.config['sync_interval']).minutes.do(self.scheduled_sync)
+            logging.info(f"Configuration loaded, config check interval: {self.config['sync_interval']} minutes")
+            # Schedule the config update task
+            schedule.every(self.config['sync_interval']).minutes.do(self.scheduled_config_update)
 
-            # Synced projects submenu removed
-
-            # Set up file watcher if enabled
+            # Set up file watcher if enabled (now triggers config update)
             self.setup_file_watcher()
 
             # --- Start Syncthing Daemon ---
@@ -268,21 +261,18 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             logging.debug("File watching is disabled")
 
     def on_files_changed(self):
-        """Callback for when files change"""
-        logging.debug("File changes detected")
-        if not self.is_syncing: # Use correct flag
-            logging.info("File changes detected, Syncthing should handle this.")
-            # Change notification: File changes trigger Syncthing directly.
-            # We might trigger a config update check instead.
-            rumps.notification(
-                "TurboSync", # Keep notification for now, user might expect feedback
-                "File Changes Detected", "Syncthing is handling changes...", # Updated message
-                sound=False
-            )
-            # No longer call sync_now here, Syncthing handles it
-            # self.sync_now(None)
-            # TODO: Decide if we need to trigger a config update or API check here
-            # self.update_syncthing_config_task(None) # Example: Trigger config update
+        """Callback for when files change (likely triggers config update)"""
+        logging.debug("File changes detected by fswatch")
+        # Trigger a Syncthing configuration update check, as a .livework file
+        # might have been added or removed.
+        logging.info("File changes detected, triggering Syncthing configuration update check.")
+        rumps.notification(
+            "TurboSync",
+            "File Changes Detected",
+            "Checking Syncthing configuration...",
+            sound=False
+        )
+        self.update_syncthing_config_task(None) # Trigger the config update task
 
     @rumps.clicked("Enable File Watching") # Keep decorator
     def toggle_file_watching(self, sender):
@@ -345,148 +335,87 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 self.watch_toggle.state = False # Update the correct item's state
                 self.watch_enabled = False
 
-        # self.perform_sync_task() # Don't call automatically here, wait for click
+        # self.perform_sync_task() # Removed
 
-    # --- New perform_sync_task method (replaces old one and _check_sync_progress/_update_status_after_sync) ---
-    @rumps.clicked("Sync Now") # Add decorator
-    def perform_sync_task(self, sender=None): # Add sender argument
-        """Handles the execution of the sync process in a separate thread. Triggered by 'Sync Now' click or scheduled sync."""
-        # Log sender if needed: logging.debug(f"perform_sync_task triggered by: {sender}")
-        if self.is_syncing:
-            logging.warning("Sync task requested, but sync is already in progress.")
-            rumps.notification("Sync In Progress", "", "A synchronization task is already running.")
-            # Ensure panel is visible if sync is ongoing and panel exists
-            if self.status_panel and not self.status_panel.isVisible():
-                self.show_status_panel()
+    # --- New task for updating Syncthing configuration ---
+    # No decorator needed here if only called internally or via the MenuItem defined above
+    def update_syncthing_config_task(self, sender=None):
+        """Handles the execution of the Syncthing config update in a separate thread."""
+        if self.is_updating_config:
+            logging.warning("Config update task requested, but update is already in progress.")
+            rumps.notification("Config Update In Progress", "", "Syncthing configuration update is already running.")
             return
 
-        logger.info("Starting sync task...")
-        self.is_syncing = True
-        # Update UI to indicate syncing (e.g., disable button, change icon/status)
-        self.status_item.title = "Status: Syncing..."
-        # Consider disabling the "Sync Now" menu item temporarily if needed
-        # self.menu["Sync Now"].set_callback(None) # Example: Disable callback
-
-        # Ensure the status panel exists and clear it before starting sync
-        if self.status_panel:
-            logger.debug("Clearing existing status panel before new sync.")
-            self.status_panel.clear_status()
-        else:
-            # If panel doesn't exist, show_status_panel will create it later if needed
-            # or if the user clicks the menu item.
-            pass
-
-        # Show the status panel (it will be cleared or newly created)
-        self.show_status_panel() # Ensure it's visible for the new sync
+        logger.info("Starting Syncthing configuration update task...")
+        self.is_updating_config = True
+        # Update UI to indicate config update is happening
+        # Keep main status reflecting Syncthing state, maybe add temporary indicator?
+        original_status_title = self.status_item.title
+        self.status_item.title = "Status: Updating Config..."
+        # Consider disabling the "Update Syncthing Config" menu item temporarily
+        # self.menu["Update Syncthing Config"].set_callback(None) # Example
 
         # Define the target function for the background thread
-        def sync_thread_target():
-            logger.info("Sync thread started.")
-            final_results = None
-            overall_success = False
-            sync_message = "Sync finished."
+        def config_update_thread_target():
+            logger.info("Config update thread started.")
+            success = False
+            message = "Config update failed."
             try:
-                # Start the timer to check the progress queue
-                self._start_progress_timer()
+                # Call the function from sync.py
+                success, message = update_syncthing_configuration()
 
-                # Pass the progress queue to perform_sync
-                final_results = perform_sync(progress_queue=self.progress_queue)
-
-                # --- Sync Finished ---
-                if final_results is not None: # Check if sync ran (wasn't a config error)
-                    successful_syncs = sum(1 for res in final_results.values() if res.get('success', False))
-                    total_dirs = len(final_results)
-                    overall_success = total_dirs == 0 or successful_syncs == total_dirs
-                    if total_dirs == 0:
-                        sync_message = "No projects found to sync."
-                    elif overall_success:
-                        sync_message = f"Synced {successful_syncs}/{total_dirs} projects successfully."
-                    else:
-                        sync_message = f"Sync completed with {total_dirs - successful_syncs} failures out of {total_dirs} projects."
-
-                    logger.info(f"Sync task completed in thread. {sync_message}")
-                    # Show notification (safe from thread)
-                    rumps.notification(
-                        "TurboSync",
-                        "Sync Complete" if overall_success else "Sync Finished with Errors",
-                        sync_message,
-                        sound=not overall_success # Sound on failure
-                    )
-                    # Optionally emit one final signal for overall completion if needed by panel
-                    # self.sync_emitter.sync_progress_update.emit({
-                    #     'type': 'overall_end', 'success': overall_success,
-                    #     'message': sync_message
-                    # })
-                else:
-                    # perform_sync returned None (config error or major exception)
-                    logger.error("Sync task failed with configuration or unexpected error.")
-                    overall_success = False
-                    sync_message = "Sync failed due to error. Check logs."
-                    rumps.notification("TurboSync Sync Failed", sync_message, "", sound=True)
-                    # Optionally emit final failure signal
-                    # self.sync_emitter.sync_progress_update.emit({
-                    #     'type': 'overall_end', 'success': False, 'message': sync_message
-                    # })
+                logger.info(f"Config update task completed in thread. Success: {success}, Message: {message}")
+                # Show notification (safe from thread)
+                rumps.notification(
+                    "TurboSync",
+                    "Syncthing Config Updated" if success else "Syncthing Config Update Failed",
+                    message,
+                    sound=not success # Sound on failure
+                )
 
             except Exception as e:
-                logger.error(f"Exception in sync thread target: {e}")
+                logger.error(f"Exception in config update thread target: {e}")
                 logger.exception("Traceback:")
-                overall_success = False
-                sync_message = f"Error during sync: {e}"
-                rumps.notification("TurboSync Sync Error", sync_message, "", sound=True)
-                # Optionally emit final failure signal
-                # self.sync_emitter.sync_progress_update.emit({
-                #     'type': 'overall_end', 'success': False, 'message': sync_message
-                # })
+                success = False
+                message = f"Error during config update: {e}"
+                rumps.notification("TurboSync Config Error", message, "", sound=True)
             finally:
-                # This block runs regardless of success or failure in the thread
-                # Stop the progress timer before scheduling the final UI update
-                self._stop_progress_timer()
-
                 # Schedule the final UI update on the main thread using a timer
                 update_callback = functools.partial(
-                    self._finalize_sync_ui,
-                    overall_success,
-                    sync_message,
-                    final_results # Pass results for potential future use
+                    self._finalize_config_update_ui,
+                    success,
+                    message,
+                    original_status_title # Pass back original title to restore if needed
                 )
                 # Use rumps.Timer for one-shot callback
                 rumps.Timer(update_callback, 0.1).start()
-                logger.debug("Scheduled final UI update from sync thread.")
+                logger.debug("Scheduled final UI update from config update thread.")
 
         # Create and start the thread
-        self.sync_thread = threading.Thread(target=sync_thread_target, daemon=True)
-        self.sync_thread.start()
+        self.config_update_thread = threading.Thread(target=config_update_thread_target, daemon=True)
+        self.config_update_thread.start()
 
-    # --- New method to finalize UI updates on main thread ---
-    def _finalize_sync_ui(self, overall_success, sync_message, final_results, timer):
-        """Updates the UI on the main thread after sync completion."""
+    # --- New method to finalize UI updates on main thread after config update ---
+    def _finalize_config_update_ui(self, success, message, original_status_title, timer):
+        """Updates the UI on the main thread after config update completion."""
         # 'timer' object is passed automatically by rumps.Timer
-        logger.info("Finalizing sync UI on main thread.")
-        logger.debug("Setting self.is_syncing = False") # Add logging
-        self.is_syncing = False
-        logger.debug("self.is_syncing is now False") # Add logging
-        self.last_sync_status = f"Last config update: {time.strftime('%H:%M:%S')} - {'Success' if overall_success else 'Failed'}"
-        # Don't update main status item here, polling will handle it
-        # self.status_item.title = f"Status: {self.last_sync_status}"
-        self.last_sync_results = final_results # Store results if needed
+        logger.info("Finalizing config update UI on main thread.")
+        self.is_updating_config = False
+        self.last_config_update_status = f"Last update: {time.strftime('%H:%M:%S')} - {'Success' if success else 'Failed'}"
 
-        # Re-enable the "Sync Now" menu item if it was disabled
-        # if self.menu["Sync Now"].callback is None:
-        #    self.menu["Sync Now"].set_callback(self.sync_now)
+        # Restore status title or trigger immediate poll?
+        # Triggering a poll is better as the config change might affect status
+        self.status_item.title = original_status_title # Restore briefly
+        self._poll_syncthing_status() # Trigger immediate poll to reflect changes
 
-        # Optional: Update status panel one last time if it's still open
-        # if self.status_panel and self.status_panel.isVisible():
-        #    # Maybe add a final summary message to the panel?
-        #    pass
+        # Re-enable the "Update Syncthing Config" menu item if it was disabled
+        # update_item = self.menu.get("Update Syncthing Config") # Get by key/title
+        # if update_item and update_item.callback is None:
+        #    update_item.set_callback(self.update_syncthing_config_task)
 
-        logger.info("Sync UI finalized.")
+        logger.info("Config update UI finalized.")
 
     # --- Progress Queue Handling Removed ---
-    # def _start_progress_timer(self): ...
-    # def _stop_progress_timer(self): ...
-    # def _check_progress_queue(self, timer): ...
-    # --- End Progress Queue Handling Removed ---
 
     # --- Syncthing Status Polling ---
     def _start_status_poll_timer(self, interval=5): # Poll every 5 seconds
@@ -557,17 +486,12 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             # Consider stopping the timer if errors persist?
     # --- End Syncthing Status Polling ---
 
-    # --- Update scheduled_sync ---
-    def scheduled_sync(self):
-        """Run the scheduled sync if not already syncing"""
-        # This function might become obsolete or change purpose if Syncthing handles scheduling
-        logging.debug("Scheduled sync triggered (currently no-op with Syncthing)")
-        # if not self.is_syncing: # Use the correct flag
-        #     logging.info("Starting scheduled sync")
-        #     # No need to create thread here, call the task handler
-        #     self.perform_sync_task()
-        # else:
-        #     logging.debug("Skipping scheduled sync (sync already in progress)")
+    # --- Update scheduled task ---
+    def scheduled_config_update(self):
+        """Run the scheduled Syncthing configuration update"""
+        logging.info("Scheduled Syncthing configuration update triggered.")
+        # Call the task handler directly
+        self.update_syncthing_config_task()
 
     @rumps.clicked("View Logs") # Keep decorator
     def view_logs(self, _):
@@ -719,12 +643,12 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                  raise ValueError("load_config failed to return a valid configuration after save.")
             logging.info(f"New sync interval: {self.config['sync_interval']} minutes")
 
-            # Reschedule the sync job
+            # Reschedule the config update job
             schedule.clear()
-            schedule.every(self.config['sync_interval']).minutes.do(self.scheduled_sync)
-            logging.info("Rescheduled sync job.")
+            schedule.every(self.config['sync_interval']).minutes.do(self.scheduled_config_update)
+            logging.info("Rescheduled Syncthing config update job.")
 
-            # Restart file watcher if settings changed
+            # Restart file watcher if settings changed (path, delay, or enabled status)
             # Compare new watch setting with current state
             new_watch_enabled = str(new_settings.get('WATCH_LOCAL_FILES', 'false')).lower() == 'true'
             if new_watch_enabled != self.watch_enabled:
