@@ -18,16 +18,20 @@ logger = logging.getLogger(__name__)
 
 # Define default values for configuration settings
 DEFAULT_CONFIG = {
+    'source_dir': '', # Renamed from mounted_volume_path
     'local_dir': '',
     'sync_interval': 5,
-    'use_mounted_volume': True, # Keep this true as it's the primary mode now
-    'mounted_volume_path': '',
-    'remote_syncthing_device_id': '',
-    'syncthing_api_key': '',
-    'syncthing_listen_address': '127.0.0.1:8385',
     'watch_local_files': True,
     'watch_delay_seconds': 2,
     'start_at_login': False,
+    # Syncthing Instance A (Source) Defaults
+    'syncthing_api_address_source': '127.0.0.1:8384',
+    'syncthing_gui_address_source': '127.0.0.1:8385',
+    'syncthing_api_key_source': '',
+    # Syncthing Instance B (Destination) Defaults
+    'syncthing_api_address_dest': '127.0.0.1:8386',
+    'syncthing_gui_address_dest': '127.0.0.1:8387',
+    'syncthing_api_key_dest': '',
 }
 
 def load_config(dotenv_path=None):
@@ -54,13 +58,17 @@ def load_config(dotenv_path=None):
 
     # Build config dictionary, applying loaded values over defaults
     config = {}
+    config['source_dir'] = loaded_values.get('SOURCE_DIR', DEFAULT_CONFIG['source_dir'])
     config['local_dir'] = loaded_values.get('LOCAL_DIR', DEFAULT_CONFIG['local_dir'])
     config['sync_interval'] = int(loaded_values.get('SYNC_INTERVAL', DEFAULT_CONFIG['sync_interval']))
-    config['use_mounted_volume'] = True # Always true
-    config['mounted_volume_path'] = loaded_values.get('MOUNTED_VOLUME_PATH', DEFAULT_CONFIG['mounted_volume_path'])
-    config['remote_syncthing_device_id'] = loaded_values.get('REMOTE_SYNCTHING_DEVICE_ID', DEFAULT_CONFIG['remote_syncthing_device_id'])
-    config['syncthing_api_key'] = loaded_values.get('SYNCTHING_API_KEY', DEFAULT_CONFIG['syncthing_api_key'])
-    config['syncthing_listen_address'] = loaded_values.get('SYNCTHING_LISTEN_ADDRESS', DEFAULT_CONFIG['syncthing_listen_address'])
+    # Source Syncthing Instance
+    config['syncthing_api_address_source'] = loaded_values.get('SYNCTHING_API_ADDRESS_SOURCE', DEFAULT_CONFIG['syncthing_api_address_source'])
+    config['syncthing_gui_address_source'] = loaded_values.get('SYNCTHING_GUI_ADDRESS_SOURCE', DEFAULT_CONFIG['syncthing_gui_address_source'])
+    config['syncthing_api_key_source'] = loaded_values.get('SYNCTHING_API_KEY_SOURCE', DEFAULT_CONFIG['syncthing_api_key_source'])
+    # Destination Syncthing Instance
+    config['syncthing_api_address_dest'] = loaded_values.get('SYNCTHING_API_ADDRESS_DEST', DEFAULT_CONFIG['syncthing_api_address_dest'])
+    config['syncthing_gui_address_dest'] = loaded_values.get('SYNCTHING_GUI_ADDRESS_DEST', DEFAULT_CONFIG['syncthing_gui_address_dest'])
+    config['syncthing_api_key_dest'] = loaded_values.get('SYNCTHING_API_KEY_DEST', DEFAULT_CONFIG['syncthing_api_key_dest'])
     config['watch_local_files'] = str(loaded_values.get('WATCH_LOCAL_FILES', str(DEFAULT_CONFIG['watch_local_files']))).lower() == 'true'
     config['watch_delay_seconds'] = int(loaded_values.get('WATCH_DELAY_SECONDS', DEFAULT_CONFIG['watch_delay_seconds']))
     config['start_at_login'] = str(loaded_values.get('START_AT_LOGIN', str(DEFAULT_CONFIG['start_at_login']))).lower() == 'true'
@@ -73,11 +81,11 @@ def load_config(dotenv_path=None):
     # If using defaults, assume configuration is needed.
     config['is_valid'] = False # Assume invalid until proven otherwise
     config['validation_message'] = "Configuration not loaded from file. Please configure via Settings."
-    config['is_mounted'] = False # Default to false
+    config['source_dir_exists'] = False # Default to false
 
     if config_loaded_from_file:
-        # Essential keys if loaded from file: Local directory, path to the mounted source volume, and the remote Syncthing ID
-        required_keys = ['local_dir', 'mounted_volume_path', 'remote_syncthing_device_id']
+        # Essential keys if loaded from file: Source and Local directories
+        required_keys = ['source_dir', 'local_dir']
         missing_keys = [key for key in required_keys if not config.get(key)]
 
         if missing_keys:
@@ -85,16 +93,15 @@ def load_config(dotenv_path=None):
             logger.error(f"Configuration loaded from file is invalid: {config['validation_message']}")
         else:
             # Check if the mounted volume path exists
-            if os.path.exists(config['mounted_volume_path']):
-                logger.info(f"Using configured mounted volume: {config['mounted_volume_path']}")
-                config['mounted_path'] = config['mounted_volume_path'] # Use 'mounted_path' internally
-                config['is_mounted'] = True # Keep this flag for clarity elsewhere
+            if os.path.exists(config['source_dir']):
+                logger.info(f"Source directory exists: {config['source_dir']}")
+                config['source_dir_exists'] = True
                 config['is_valid'] = True # Configuration is valid
                 config['validation_message'] = "Configuration loaded and valid."
                 logger.info("Configuration loaded from file is valid.")
             else:
                 # If the specified path doesn't exist, it's a fatal configuration error *for this loaded config*
-                config['validation_message'] = f"Configured MOUNTED_VOLUME_PATH not found: {config['mounted_volume_path']}"
+                config['validation_message'] = f"Configured SOURCE_DIR not found: {config['source_dir']}"
                 logger.error(f"Configuration loaded from file is invalid: {config['validation_message']}")
                 # Do not raise ValueError here, let the caller handle invalid state
 
@@ -121,45 +128,45 @@ def find_livework_dirs(config):
     """Find directories with .livework files on the remote server or mounted volume"""
     logger.info("Scanning for .livework files")
     
-    livework_dirs = []
-    mounted_path = config.get('mounted_path') # Get the validated mounted path
+    livework_source_dirs = []
+    source_dir = config.get('source_dir') # Get the configured source directory
 
-    if not mounted_path:
-        logger.error("Mounted path configuration is missing, cannot scan for .livework files.")
+    if not source_dir:
+        logger.error("Source directory configuration is missing, cannot scan for .livework files.")
         return []
 
-    logger.info(f"Searching for .livework files in mounted volume: {mounted_path}")
+    logger.info(f"Searching for .livework files in source directory: {source_dir}")
 
     try:
         # Log the top-level directory contents for debugging
-        if os.path.exists(mounted_path):
-            logger.debug(f"Contents of mounted directory: {mounted_path}")
+        if os.path.exists(source_dir):
+            logger.debug(f"Contents of source directory: {source_dir}")
             try:
-                entries = os.listdir(mounted_path)
+                entries = os.listdir(source_dir)
                 for entry in entries:
                     logger.debug(f"  - {entry}")
             except Exception as e:
-                logger.error(f"Error listing mounted directory contents: {e}")
+                logger.error(f"Error listing source directory contents: {e}")
             
             # Walk the directory tree to find .livework files
             logger.info("Beginning directory walk to find .livework files...")
-            for root, dirs, files in os.walk(mounted_path):
+            for root, dirs, files in os.walk(source_dir):
                 logger.debug(f"Checking directory: {root}")
                 # Check for both '.livework' (hidden) and 'livework' (visible) files
                 if '.livework' in files or 'livework' in files:
-                    livework_dirs.append(root)
+                    livework_source_dirs.append(root)
                     logger.info(f"Found .livework in: {root}")
             
-            logger.info(f"Found {len(livework_dirs)} directories with .livework files.")
+            logger.info(f"Found {len(livework_source_dirs)} directories with .livework files.")
         else:
-             logger.error(f"Mounted directory does not exist: {mounted_path}")
+             logger.error(f"Source directory does not exist: {source_dir}")
              return []
 
     except Exception as e:
-        logger.error(f"Error finding .livework directories in mounted volume: {str(e)}")
+        logger.error(f"Error finding .livework directories in source directory: {str(e)}")
         return []
 
-    return livework_dirs
+    return livework_source_dirs
 
 # Removed list_remote_directory (SSH specific, not core sync)
 # Removed sync_directory (rsync specific)
@@ -167,12 +174,15 @@ def find_livework_dirs(config):
 
 # --- New Syncthing Configuration Update Logic ---
 from .syncthing_manager import SyncthingApiClient, get_api_key_from_config, SYNCTHING_CONFIG_DIR, DEFAULT_SYNCTHING_API_ADDRESS
+# TODO: SYNCTHING_CONFIG_DIR and DEFAULT_SYNCTHING_API_ADDRESS need updating for two instances
 
 def update_syncthing_configuration():
     """
     Finds .livework directories, compares with current Syncthing config,
-    and updates the Syncthing daemon's configuration via API.
+    and updates BOTH local Syncthing daemon configurations via API to sync
+    the corresponding folders between them.
     """
+    # !!! This function needs a major rewrite for the two-instance model !!!
     logger.info("Starting Syncthing configuration update process...")
     config_updated = False
     error_occurred = False
@@ -192,45 +202,56 @@ def update_syncthing_configuration():
 
         # Config is valid, proceed with extracting values
         local_base_dir = config['local_dir']
-        remote_device_id = config['remote_syncthing_device_id']
-        api_addr = config.get('syncthing_listen_address', DEFAULT_SYNCTHING_API_ADDRESS)
-        api_key = config.get('syncthing_api_key')
+        source_base_dir = config['source_dir'] # Renamed from mounted_path
 
-        # 2. Initialize Syncthing API Client
-        if not api_key:
-            logger.info("SYNCTHING_API_KEY not in .env, attempting to retrieve from config.xml...")
-            api_key = get_api_key_from_config(config_dir=SYNCTHING_CONFIG_DIR)
-            if not api_key:
-                raise ValueError("Syncthing API key not found in .env or config.xml. Cannot update configuration.")
-            logger.info("Successfully retrieved API key from config.xml.")
+        api_addr_source = config['syncthing_api_address_source']
+        api_key_source = config.get('syncthing_api_key_source')
+        # TODO: Need separate config dir logic for source instance
+        # config_dir_source = os.path.join(USER_CONFIG_DIR, 'syncthing_config_source')
 
-        api_client = SyncthingApiClient(api_key=api_key, address=api_addr)
+        api_addr_dest = config['syncthing_api_address_dest']
+        api_key_dest = config.get('syncthing_api_key_dest')
+        # TODO: Need separate config dir logic for dest instance
+        # config_dir_dest = os.path.join(USER_CONFIG_DIR, 'syncthing_config_dest')
+
+        # 2. Initialize Syncthing API Clients (for both instances)
+        # TODO: Refactor API key retrieval for two instances
+        # if not api_key_source: api_key_source = get_api_key_from_config(config_dir=config_dir_source)
+        # if not api_key_dest: api_key_dest = get_api_key_from_config(config_dir=config_dir_dest)
+
+        if not api_key_source or not api_addr_source:
+             raise ValueError("Source Syncthing API Key or Address missing.")
+        if not api_key_dest or not api_addr_dest:
+             raise ValueError("Destination Syncthing API Key or Address missing.")
+
+        api_client_source = SyncthingApiClient(api_key=api_key_source, address=api_addr_source)
+        api_client_dest = SyncthingApiClient(api_key=api_key_dest, address=api_addr_dest)
 
         # 3. Find .livework Directories
-        # find_livework_dirs uses remote_dir (SSH) or mounted_path (local) from config
         logger.info("Scanning for .livework directories...")
-        livework_remote_paths = find_livework_dirs(config)
-        if not livework_remote_paths:
+        livework_source_paths = find_livework_dirs(config) # Returns paths on the source volume
+        if not livework_source_paths:
             logger.warning("No .livework directories found.")
             # Decide if we should remove all folders from Syncthing config in this case?
             # For now, just log and proceed to check existing config.
+            # TODO: Implement removal logic if desired.
 
         # Map found source paths (from mounted volume) to desired local paths and folder IDs
         desired_folders = {} # {folder_id: {'local_path': '/path/to/local', 'source_path': '/path/to/source'}}
         base_mounted_path = config['mounted_path'] # Use the validated mounted path
 
-        for source_path in livework_remote_paths: # Variable name kept for now, but it's the source path on the mount
+        for source_path in livework_source_paths: # Variable name kept for now, but it's the source path on the mount
             # Derive local path relative to the local_base_dir
-            if source_path == base_mounted_path:
+            if source_path == source_base_dir:
                 rel_path = '.' # Sync the base directory itself if it has .livework
             else:
                 try:
                     # Calculate path relative to the base of the mounted volume
-                    rel_path = os.path.relpath(source_path, base_mounted_path)
+                    rel_path = os.path.relpath(source_path, source_base_dir)
                 except ValueError as e:
                     # This might happen if paths are fundamentally different (e.g., different drives on Windows, though unlikely here)
                     rel_path = os.path.basename(source_path)
-                    logger.warning(f"Could not determine relative path for '{source_path}' relative to '{base_mounted_path}'. Using basename '{rel_path}'. Error: {e}")
+                    logger.warning(f"Could not determine relative path for '{source_path}' relative to '{source_base_dir}'. Using basename '{rel_path}'. Error: {e}")
 
             local_path = os.path.normpath(os.path.join(local_base_dir, rel_path))
             # Create a reasonably unique folder ID (e.g., based on relative path)
@@ -243,115 +264,142 @@ def update_syncthing_configuration():
             # Truncate if too long (Syncthing might have limits) - adjust limit as needed
             folder_id = folder_id[:64] # Example limit
 
-            # Ensure local directory exists (Syncthing might need it)
+            # Ensure local directory exists (Syncthing Destination instance needs it)
             os.makedirs(local_path, exist_ok=True)
+            # Source directory already exists (it's where we found .livework)
 
-            desired_folders[folder_id] = {'local_path': local_path, 'source_path': source_path}
+            # Store both paths for the folder ID
+            desired_folders[folder_id] = {'dest_path': local_path, 'source_path': source_path}
             logger.debug(f"Desired folder: ID='{folder_id}', Local='{local_path}', Source='{source_path}'")
 
         # 4. Get Current Syncthing Configuration
-        logger.info("Fetching current Syncthing configuration via API...")
-        current_st_config = api_client.get_config()
-        if current_st_config is None:
-            raise ConnectionError("Failed to fetch current Syncthing configuration from API.")
+        # TODO: Need to fetch config for BOTH instances
+        logger.info("Fetching current Syncthing configurations via API...")
+        current_config_source = api_client_source.get_config()
+        current_config_dest = api_client_dest.get_config()
+        if current_config_source is None or current_config_dest is None:
+             raise ConnectionError("Failed to fetch current Syncthing configuration from one or both APIs.")
+
 
         # Make a deep copy to modify safely
         import copy
-        new_st_config = copy.deepcopy(current_st_config)
-        if 'folders' not in new_st_config: new_st_config['folders'] = []
-        if 'devices' not in new_st_config: new_st_config['devices'] = []
+        new_config_source = copy.deepcopy(current_config_source)
+        new_config_dest = copy.deepcopy(current_config_dest)
+        if 'folders' not in new_config_source: new_config_source['folders'] = []
+        if 'devices' not in new_config_source: new_config_source['devices'] = []
+        if 'folders' not in new_config_dest: new_config_dest['folders'] = []
+        if 'devices' not in new_config_dest: new_config_dest['devices'] = []
+
 
         # 5. Get Local Device ID
-        local_device_id = None
-        if 'devices' in new_st_config:
-            # Find the device entry that corresponds to the local instance
-            # This is often the first device listed or identified by name="localhost" or similar
-            # A more robust way might be needed if the config is complex.
-            # For now, assume the first device is local if only one exists, or look for clues.
-            # A better approach: Call /system/status to get the local device ID ('myID')
-            system_status = api_client._request('GET', '/system/status')
-            if system_status and 'myID' in system_status:
-                local_device_id = system_status['myID']
-                logger.info(f"Got local Syncthing device ID: {local_device_id}")
-            else:
-                 logger.warning("Could not determine local Syncthing device ID from API. Configuration update might be incomplete.")
-                 # Fallback: Try finding it in the config devices list (less reliable)
-                 # for dev in new_st_config['devices']:
-                 #    # Heuristic: Check for common local names or lack of address
-                 #    if dev.get('name') == platform.node() or not dev.get('address'):
-                 #         local_device_id = dev.get('deviceID')
-                 #         logger.warning(f"Guessed local device ID from config: {local_device_id}")
-                 #         break
+        # TODO: Get Device IDs for BOTH local instances
+        device_id_source = None
+        device_id_dest = None
+
+        status_source = api_client_source.get_system_status() # Need a get_system_status method
+        if status_source and 'myID' in status_source:
+            device_id_source = status_source['myID']
+            logger.info(f"Got Source Syncthing Device ID: {device_id_source}")
+        else:
+            raise ConnectionError("Could not determine Source Syncthing Device ID from API.")
+
+        status_dest = api_client_dest.get_system_status() # Need a get_system_status method
+        if status_dest and 'myID' in status_dest:
+            device_id_dest = status_dest['myID']
+            logger.info(f"Got Destination Syncthing Device ID: {device_id_dest}")
+        else:
+            raise ConnectionError("Could not determine Destination Syncthing Device ID from API.")
 
         # 6. Compare and Update Folders
-        current_folder_ids = {f.get('id') for f in new_st_config['folders']}
-        desired_folder_ids = set(desired_folders.keys())
+        # TODO: This logic needs to be applied to BOTH config_source and config_dest
+        # Example for Source Instance (needs adaptation for Dest instance)
+        current_folder_ids_source = {f.get('id') for f in new_config_source['folders']}
+        desired_folder_ids = set(desired_folders.keys()) # Same desired folders for both
 
-        folders_to_add = desired_folder_ids - current_folder_ids
-        folders_to_remove = current_folder_ids - desired_folder_ids
-        folders_to_keep = current_folder_ids.intersection(desired_folder_ids)
+        folders_to_add_source = desired_folder_ids - current_folder_ids_source
+        folders_to_remove_source = current_folder_ids_source - desired_folder_ids
+        folders_to_keep_source = current_folder_ids_source.intersection(desired_folder_ids)
 
-        # Remove folders no longer desired
-        if folders_to_remove:
-            logger.info(f"Removing {len(folders_to_remove)} folders from Syncthing config: {folders_to_remove}")
-            new_st_config['folders'] = [f for f in new_st_config['folders'] if f.get('id') not in folders_to_remove]
-            config_updated = True
+        # Remove folders no longer desired (Source)
+        if folders_to_remove_source:
+            logger.info(f"Removing {len(folders_to_remove_source)} folders from Source Syncthing config: {folders_to_remove_source}")
+            new_config_source['folders'] = [f for f in new_config_source['folders'] if f.get('id') not in folders_to_remove_source]
+            config_updated = True # Mark that *some* config changed
 
-        # Add new folders
-        for folder_id in folders_to_add:
-            local_path = desired_folders[folder_id]['local_path']
-            logger.info(f"Adding folder '{folder_id}' ({local_path}) to Syncthing config.")
-            # Use helper method to add folder structure
+        # Add new folders (Source)
+        for folder_id in folders_to_add_source:
+            source_path = desired_folders[folder_id]['source_path']
+            logger.info(f"Adding folder '{folder_id}' ({source_path}) to Source Syncthing config.")
             SyncthingApiClient.add_folder_to_config(
-                new_st_config,
+                new_config_source,
                 folder_id,
-                local_path,
-                devices=[remote_device_id] # Share with remote device by default
+                source_path, # Use source path for source instance
+                devices=[device_id_dest] # Share with Destination instance
             )
             config_updated = True
 
-        # Update existing folders (path, sharing) - ensure they are shared with the remote device
-        for folder_id in folders_to_keep:
-             for i, folder in enumerate(new_st_config['folders']):
+        # Update existing folders (Source)
+        for folder_id in folders_to_keep_source:
+             for i, folder in enumerate(new_config_source['folders']):
                  if folder.get('id') == folder_id:
-                     # Ensure path matches (it might change if local_dir changes)
-                     expected_local_path = desired_folders[folder_id]['local_path']
-                     if folder.get('path') != expected_local_path:
-                          logger.warning(f"Updating path for existing folder '{folder_id}': '{folder.get('path')}' -> '{expected_local_path}'")
-                          new_st_config['folders'][i]['path'] = expected_local_path
+                     # Ensure path matches
+                     expected_source_path = desired_folders[folder_id]['source_path']
+                     if folder.get('path') != expected_source_path:
+                          logger.warning(f"Updating path for existing folder '{folder_id}' in Source config: '{folder.get('path')}' -> '{expected_source_path}'")
+                          new_config_source['folders'][i]['path'] = expected_source_path
                           config_updated = True
 
-                     # Ensure it's shared with the configured remote device
+                     # Ensure it's shared with the Destination device
                      shared_devices = {d.get('deviceID') for d in folder.get('devices', [])}
-                     if remote_device_id not in shared_devices:
-                         logger.info(f"Sharing existing folder '{folder_id}' with remote device '{remote_device_id}'.")
-                         if 'devices' not in new_st_config['folders'][i]:
-                             new_st_config['folders'][i]['devices'] = []
-                         # Avoid adding duplicate device entries
-                         if not any(d.get('deviceID') == remote_device_id for d in new_st_config['folders'][i]['devices']):
-                              new_st_config['folders'][i]['devices'].append({'deviceID': remote_device_id})
+                     if device_id_dest not in shared_devices:
+                         logger.info(f"Sharing existing folder '{folder_id}' in Source config with Dest device '{device_id_dest}'.")
+                         if 'devices' not in new_config_source['folders'][i]:
+                             new_config_source['folders'][i]['devices'] = []
+                         if not any(d.get('deviceID') == device_id_dest for d in new_config_source['folders'][i]['devices']):
+                              new_config_source['folders'][i]['devices'].append({'deviceID': device_id_dest})
                               config_updated = True
-                     break # Move to next folder_id
+                     break
+
+        # --- Repeat similar logic for Destination Instance ---
+        # (Add/Remove/Update folders in new_config_dest, using dest_path and sharing with device_id_source)
+        # ... (Implementation omitted for brevity, but follows the pattern above) ...
+        logger.warning("!!! Destination folder update logic not yet implemented in this diff !!!")
+
 
         # 7. Ensure Remote Device Exists
-        current_device_ids = {d.get('deviceID') for d in new_st_config['devices']}
-        if remote_device_id not in current_device_ids:
-            logger.info(f"Adding remote device '{remote_device_id}' to Syncthing config.")
-            new_st_config['devices'].append({
-                "deviceID": remote_device_id,
-                "name": f"Remote TurboSync Device ({remote_device_id[:7]}...)", # Give it a default name
-                "addresses": ["dynamic"], # Let Syncthing discover it
-                "introducer": False,
-                # Add other necessary default device settings
-            })
+        # TODO: Ensure BOTH instances know about EACH OTHER's device ID
+        # Check Source config for Dest device
+        current_device_ids_source = {d.get('deviceID') for d in new_config_source['devices']}
+        if device_id_dest not in current_device_ids_source:
+            logger.info(f"Adding Dest device '{device_id_dest}' to Source Syncthing config.")
+            SyncthingApiClient.add_device_to_config( # Need add_device_to_config helper
+                new_config_source,
+                device_id_dest,
+                f"TurboSync Peer (Dest - {device_id_dest[:7]}...)"
+            )
             config_updated = True
+
+        # Check Dest config for Source device
+        current_device_ids_dest = {d.get('deviceID') for d in new_config_dest['devices']}
+        if device_id_source not in current_device_ids_dest:
+             logger.info(f"Adding Source device '{device_id_source}' to Dest Syncthing config.")
+             SyncthingApiClient.add_device_to_config( # Need add_device_to_config helper
+                 new_config_dest,
+                 device_id_source,
+                 f"TurboSync Peer (Source - {device_id_source[:7]}...)"
+             )
+             config_updated = True
+
 
         # 8. Apply Configuration Changes (if any)
         if config_updated:
-            logger.info("Applying updated configuration to Syncthing via API...")
-            success = api_client.update_config(new_st_config)
-            if success is None: # Check for API request failure
-                 message = "Error: Failed to apply updated Syncthing configuration via API."
+            logger.info("Applying updated configuration to Syncthing instances via API...")
+            # TODO: Apply updates to BOTH instances
+            success_source = api_client_source.update_config(new_config_source)
+            success_dest = api_client_dest.update_config(new_config_dest)
+
+            if success_source is None or success_dest is None: # Check for API request failure on either
+                 message = "Error: Failed to apply updated Syncthing configuration via API to one or both instances."
                  logger.error(message)
                  error_occurred = True
             else:

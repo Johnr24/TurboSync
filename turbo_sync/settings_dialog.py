@@ -129,38 +129,32 @@ QPushButton:pressed {
 
         # --- Define Settings Structure (Label, Key, Type, Default) ---
         # Using OrderedDict to control the display order and group boxes
+        # Defaults here should ideally match DEFAULT_CONFIG in sync.py after it's updated
         settings_layout = OrderedDict([
-            ("Remote Server", {
-                "REMOTE_USER": ("Remote Username:", QLineEdit, ""),
-                "REMOTE_HOST": ("Remote Host:", QLineEdit, ""),
-                # --- Syncthing Specific ---
-                "REMOTE_SYNCTHING_DEVICE_ID": ("Remote Syncthing Device ID:", QLineEdit, ""),
-                # --- End Syncthing Specific ---
-
-                # --- SSH Specific (Keep for now, maybe hide/show later) ---
-                "REMOTE_PORT": ("Remote Port:", QLineEdit, "22"), # Keep as QLineEdit for now
+            ("Directory Paths", {
+                "SOURCE_DIR": ("Source Directory (contains .livework):", QLineEdit, ""),
+                "LOCAL_DIR": ("Local Directory (sync destination):", QLineEdit, ""),
             }),
-            ("Local Settings", {
-                "LOCAL_DIR": ("Local Directory:", QLineEdit, ""),
+            ("Sync Behavior", {
+                "SYNC_INTERVAL": ("Config Check Interval (minutes):", QSpinBox, 5), # How often to check for new .livework folders
             }),
-            ("Mounted Volume", {
-                "USE_MOUNTED_VOLUME": ("Use Mounted Volume (instead of SSH):", QCheckBox, False),
-                "MOUNTED_VOLUME_PATH": ("Mounted Volume Path:", QLineEdit, ""),
+            ("Syncthing Instance (Source)", { # Group Box for Source Syncthing Daemon
+                "SYNCTHING_API_ADDRESS_SOURCE": ("API Address:", QLineEdit, "127.0.0.1:8384"),
+                "SYNCTHING_GUI_ADDRESS_SOURCE": ("GUI Address:", QLineEdit, "127.0.0.1:8385"),
+                "SYNCTHING_API_KEY_SOURCE": ("API Key:", QLineEdit, ""),
             }),
-            ("Sync Options", { # Renamed from "Sync Options" to "Config Update Interval" or similar?
-                "SYNC_INTERVAL": ("Config Check Interval (minutes):", QSpinBox, 5), # Use QSpinBox, clarify purpose
-                # Removed ENABLE_PARALLEL_SYNC
-                # Removed PARALLEL_PROCESSES
+            ("Syncthing Instance (Destination)", { # Group Box for Destination Syncthing Daemon
+                "SYNCTHING_API_ADDRESS_DEST": ("API Address:", QLineEdit, "127.0.0.1:8386"),
+                "SYNCTHING_GUI_ADDRESS_DEST": ("GUI Address:", QLineEdit, "127.0.0.1:8387"),
+                "SYNCTHING_API_KEY_DEST": ("API Key:", QLineEdit, ""),
             }),
-            ("Syncthing Daemon", { # Group Box for Local Syncthing Daemon
-                "SYNCTHING_API_KEY": ("Local Syncthing API Key:", QLineEdit, ""), # Clarified label
-                "SYNCTHING_LISTEN_ADDRESS": ("Local Syncthing Listen Address:", QLineEdit, "127.0.0.1:8385"), # Clarified label
-            }),
-            ("File Watching", { # Keep for triggering config updates?
+            # File watching now monitors the SOURCE_DIR for .livework changes
+            # to trigger Syncthing config updates for BOTH instances.
+            # Keep this group separate for clarity.
+            ("File Watching (Source Directory)", { # Keep for triggering config updates?
                 "WATCH_LOCAL_FILES": ("Watch Local Files (for .livework changes):", QCheckBox, True), # Clarified purpose
                 "WATCH_DELAY_SECONDS": ("Watch Delay (seconds):", QSpinBox, 2), # Use QSpinBox
             }),
-            # --- Removed Rsync Group ---
             ("Application Behavior", {
                 "START_AT_LOGIN": ("Start TurboSync at Login:", QCheckBox, False),
             }),
@@ -196,7 +190,7 @@ QPushButton:pressed {
                 self.widgets[key] = widget
 
                 # --- Special handling for directory paths ---
-                if key in ["LOCAL_DIR", "MOUNTED_VOLUME_PATH"]:
+                if key in ["LOCAL_DIR", "SOURCE_DIR"]:
                     browse_button = QPushButton("Browse...")
                     # Use a lambda to pass the specific line edit to the slot
                     browse_button.clicked.connect(lambda checked=False, le=widget: self._browse_directory(le))
@@ -207,10 +201,12 @@ QPushButton:pressed {
                     form_layout.addRow(QLabel(label_text), hbox) # Add the hbox containing both
                 else:
                     # Add tooltips for Syncthing fields
-                    if key == "REMOTE_SYNCTHING_DEVICE_ID":
-                        widget.setToolTip("Enter the Device ID of the remote Syncthing instance you want to sync with.")
-                    elif key == "SYNCTHING_API_KEY":
-                        widget.setToolTip("API Key for TurboSync to control its local Syncthing daemon. Leave blank to attempt auto-retrieval on start.")
+                    if key == "SYNCTHING_API_ADDRESS_SOURCE" or key == "SYNCTHING_API_ADDRESS_DEST":
+                         widget.setToolTip("REST API address (e.g., 127.0.0.1:port). Ensure ports are unique.")
+                    elif key == "SYNCTHING_GUI_ADDRESS_SOURCE" or key == "SYNCTHING_GUI_ADDRESS_DEST":
+                         widget.setToolTip("Web GUI address (e.g., 127.0.0.1:port). Ensure ports are unique and different from API ports.")
+                    elif key == "SYNCTHING_API_KEY_SOURCE" or key == "SYNCTHING_API_KEY_DEST":
+                        widget.setToolTip("API Key for TurboSync to control this Syncthing daemon. Leave blank to attempt auto-retrieval/generation on start.")
                     # Default behavior for other widget types
                     form_layout.addRow(QLabel(label_text), widget)
 
