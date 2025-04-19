@@ -2,10 +2,14 @@ import logging
 import sys
 from collections import OrderedDict
 
+import logging
+import sys
+from collections import OrderedDict
+
 # --- PySide6 Imports ---
 # Keep these imports specific to this file
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QVBoxLayout, QFormLayout, QLabel, QLineEdit,
+    QApplication, QDialog, QVBoxLayout, QFormLayout, QLabel, QLineEdit, QToolTip, # Added QToolTip
     QCheckBox, QPushButton, QDialogButtonBox, QGroupBox, QSpinBox, QPlainTextEdit,
     QHBoxLayout, QFileDialog  # Added QHBoxLayout and QFileDialog
 )
@@ -125,33 +129,33 @@ QPushButton:pressed {
 
         # --- Define Settings Structure (Label, Key, Type, Default) ---
         # Using OrderedDict to control the display order and group boxes
+        # Defaults here should ideally match DEFAULT_CONFIG in sync.py after it's updated
         settings_layout = OrderedDict([
-            ("Remote Server", {
-                "REMOTE_USER": ("Remote Username:", QLineEdit, ""),
-                "REMOTE_HOST": ("Remote Host:", QLineEdit, ""),
-                "REMOTE_PORT": ("Remote Port:", QLineEdit, "22"), # Keep as QLineEdit for now
+            ("Directory Paths", {
+                "SOURCE_DIR": ("Source Directory (contains .livework):", QLineEdit, ""),
+                "LOCAL_DIR": ("Local Directory (sync destination):", QLineEdit, ""),
             }),
-            ("Local Settings", {
-                "LOCAL_DIR": ("Local Directory:", QLineEdit, ""),
+            ("Sync Behavior", {
+                "SYNC_INTERVAL": ("Config Check Interval (minutes):", QSpinBox, 5), # How often to check for new .livework folders
             }),
-            ("Mounted Volume", {
-                "USE_MOUNTED_VOLUME": ("Use Mounted Volume (instead of SSH):", QCheckBox, False),
-                "MOUNTED_VOLUME_PATH": ("Mounted Volume Path:", QLineEdit, ""),
+            ("Syncthing Instance (Source)", { # Group Box for Source Syncthing Daemon
+                "SYNCTHING_API_ADDRESS_SOURCE": ("API Address:", QLineEdit, "127.0.0.1:28384"),
+                "SYNCTHING_GUI_ADDRESS_SOURCE": ("GUI Address:", QLineEdit, "127.0.0.1:28385"),
+                # API Key is auto-retrieved, no longer configured here
             }),
-            ("Sync Options", {
-                "SYNC_INTERVAL": ("Sync Interval (minutes):", QSpinBox, 5), # Use QSpinBox
-                "ENABLE_PARALLEL_SYNC": ("Enable Parallel Sync:", QCheckBox, True),
-                "PARALLEL_PROCESSES": ("Parallel Processes:", QSpinBox, 4), # Use QSpinBox
+            ("Syncthing Instance (Destination)", { # Group Box for Destination Syncthing Daemon
+                "SYNCTHING_API_ADDRESS_DEST": ("API Address:", QLineEdit, "127.0.0.1:28386"),
+                "SYNCTHING_GUI_ADDRESS_DEST": ("GUI Address:", QLineEdit, "127.0.0.1:28387"),
+                # API Key is auto-retrieved, no longer configured here
             }),
-            ("File Watching", {
-                "WATCH_LOCAL_FILES": ("Watch Local Files:", QCheckBox, True),
+            # File watching monitors the SOURCE_DIR for .livework changes
+            # to trigger Syncthing config updates for BOTH instances.
+            # Keep this group separate for clarity.
+            ("File Watching (Source Directory)", { # Keep for triggering config updates?
+                "WATCH_LOCAL_FILES": ("Watch Local Files (for .livework changes):", QCheckBox, True), # Clarified purpose
                 "WATCH_DELAY_SECONDS": ("Watch Delay (seconds):", QSpinBox, 2), # Use QSpinBox
             }),
-            ("Rsync", { # Renamed Group Box
-                # Use QPlainTextEdit for multi-line options
-                "RSYNC_OPTIONS": ("Rsync Options:", QPlainTextEdit, "-avz --progress --delete"), # Updated key, label, and default
-            }),
-            ("Application Behavior", { # New Group Box
+            ("Application Behavior", {
                 "START_AT_LOGIN": ("Start TurboSync at Login:", QCheckBox, False),
             }),
         ])
@@ -186,7 +190,7 @@ QPushButton:pressed {
                 self.widgets[key] = widget
 
                 # --- Special handling for directory paths ---
-                if key in ["LOCAL_DIR", "MOUNTED_VOLUME_PATH"]:
+                if key in ["LOCAL_DIR", "SOURCE_DIR"]:
                     browse_button = QPushButton("Browse...")
                     # Use a lambda to pass the specific line edit to the slot
                     browse_button.clicked.connect(lambda checked=False, le=widget: self._browse_directory(le))
@@ -196,6 +200,12 @@ QPushButton:pressed {
                     hbox.addWidget(browse_button) # Add the Browse button
                     form_layout.addRow(QLabel(label_text), hbox) # Add the hbox containing both
                 else:
+                    # Add tooltips for Syncthing fields
+                    if key == "SYNCTHING_API_ADDRESS_SOURCE" or key == "SYNCTHING_API_ADDRESS_DEST":
+                         widget.setToolTip("REST API address (e.g., 127.0.0.1:port). Ensure ports are unique.")
+                    elif key == "SYNCTHING_GUI_ADDRESS_SOURCE" or key == "SYNCTHING_GUI_ADDRESS_DEST":
+                         widget.setToolTip("Web GUI address (e.g., 127.0.0.1:port). Ensure ports are unique and different from API ports.")
+                    # API Key fields removed
                     # Default behavior for other widget types
                     form_layout.addRow(QLabel(label_text), widget)
 

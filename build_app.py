@@ -159,16 +159,13 @@ def build_app(args):
     os.chdir(script_dir)
 
     # Find required binaries needed for bundling
-    print("Locating required binaries (fswatch, rsync)...") # Changed rclone to rsync
+    print("Locating required binaries (fswatch, syncthing)...")
     fswatch_path = find_required_binary("fswatch")
-    rsync_path = find_required_binary("rsync") # Changed to rsync
+    syncthing_path = find_required_binary("syncthing")
     print("Required binaries located successfully.")
 
-    # Make sure dependencies are installed
+    # Make sure dependencies are installed (Pillow should be in requirements.txt now)
     subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
-    
-    # Add Pillow for icon creation
-    subprocess.run([sys.executable, "-m", "pip", "install", "Pillow"], check=True)
     
     # Ensure icon exists and get its path
     icon_path, icns_path = ensure_icon_exists()
@@ -279,9 +276,9 @@ app = BUNDLE(
         shutil.copy2(fswatch_path, dest_fswatch) # copy2 preserves metadata like permissions
         print(f"  - Copied {os.path.basename(fswatch_path)} to {macos_dir}")
 
-        dest_rsync = os.path.join(macos_dir, os.path.basename(rsync_path))
-        shutil.copy2(rsync_path, dest_rsync)
-        print(f"  - Copied {os.path.basename(rsync_path)} to {macos_dir}")
+        dest_syncthing = os.path.join(macos_dir, os.path.basename(syncthing_path))
+        shutil.copy2(syncthing_path, dest_syncthing)
+        print(f"  - Copied {os.path.basename(syncthing_path)} to {macos_dir}")
     except Exception as e:
         print(f"Error manually copying binaries: {e}")
         # Decide if build should fail here? For now, just warn and continue.
@@ -295,7 +292,8 @@ app = BUNDLE(
     # Explicitly set execute permissions for bundled binaries after build
     macos_dir = os.path.join(app_path, "Contents", "MacOS")
     fswatch_bundled_path = os.path.join(macos_dir, os.path.basename(fswatch_path))
-    rsync_bundled_path = os.path.join(macos_dir, os.path.basename(rsync_path))
+    # rsync_bundled_path = os.path.join(macos_dir, os.path.basename(rsync_path)) # Removed rsync
+    syncthing_bundled_path = os.path.join(macos_dir, os.path.basename(syncthing_path))
 
     print(f"Setting execute permissions for bundled binaries in {macos_dir}...")
     try:
@@ -305,11 +303,18 @@ app = BUNDLE(
         else:
              print(f"  - Warning: Bundled fswatch not found at {fswatch_bundled_path}")
 
-        if os.path.exists(rsync_bundled_path):
-             subprocess.run(["chmod", "+x", rsync_bundled_path], check=True)
-             print(f"  - Set +x for {os.path.basename(rsync_path)}")
+        # Removed rsync permission setting
+        # if os.path.exists(rsync_bundled_path):
+        #      subprocess.run(["chmod", "+x", rsync_bundled_path], check=True)
+        #      print(f"  - Set +x for {os.path.basename(rsync_path)}")
+        # else:
+        #      print(f"  - Warning: Bundled rsync not found at {rsync_bundled_path}")
+
+        if os.path.exists(syncthing_bundled_path):
+            subprocess.run(["chmod", "+x", syncthing_bundled_path], check=True)
+            print(f"  - Set +x for {os.path.basename(syncthing_path)}")
         else:
-             print(f"  - Warning: Bundled rsync not found at {rsync_bundled_path}")
+            print(f"  - Warning: Bundled syncthing not found at {syncthing_bundled_path}")
     except Exception as e:
         print(f"Warning: Failed to set execute permissions for bundled binaries: {e}")
 

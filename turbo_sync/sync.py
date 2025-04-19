@@ -15,569 +15,450 @@ if __name__ == "__main__":
 # Use root logger instead of configuring a separate one
 # This ensures compatibility with the logging setup in main.py
 logger = logging.getLogger(__name__)
- 
+
+# Define default values for configuration settings
+DEFAULT_CONFIG = {
+    'source_dir': '', # Renamed from mounted_volume_path
+    'local_dir': '',
+    'sync_interval': 5,
+    'watch_local_files': True,
+    'watch_delay_seconds': 2,
+    'start_at_login': False,
+    # Syncthing Instance A (Source) Defaults
+    'syncthing_api_address_source': '127.0.0.1:28384', # Changed port
+    'syncthing_gui_address_source': '127.0.0.1:28385', # Changed port
+    # 'syncthing_api_key_source': '', # Removed - Auto-retrieved
+    # Syncthing Instance B (Destination) Defaults
+    'syncthing_api_address_dest': '127.0.0.1:28386', # Changed port
+    'syncthing_gui_address_dest': '127.0.0.1:28387', # Changed port
+    # 'syncthing_api_key_dest': '', # Removed - Auto-retrieved
+}
+
 def load_config(dotenv_path=None):
     """
-    Load configuration from .env file.
+    Load configuration from .env file if it exists, otherwise return defaults.
     Prioritizes the file specified by dotenv_path if provided.
+    Returns the config dictionary and a boolean indicating if a file was loaded.
     """
-    if dotenv_path and os.path.exists(dotenv_path):
-        logger.info(f"Loading configuration from specified path: {dotenv_path}")
-        load_dotenv(dotenv_path=dotenv_path, override=True)
+    config_loaded_from_file = False
+    # Use find_dotenv from python-dotenv to locate the .env file automatically
+    # if no specific path is given. This handles searching parent directories.
+    from dotenv import find_dotenv, dotenv_values
+    effective_dotenv_path = dotenv_path or find_dotenv() # Use find_dotenv if no path specified
+
+    if effective_dotenv_path and os.path.exists(effective_dotenv_path):
+        logger.info(f"Loading configuration from: {effective_dotenv_path}")
+        # Use dotenv_values to get dict without modifying os.environ directly initially
+        loaded_values = dotenv_values(dotenv_path=effective_dotenv_path)
+        config_loaded_from_file = True
+        logger.debug(f"Values loaded from file: {loaded_values}")
     else:
-        # Fallback to default behavior (searching current/parent dirs) if path not provided or doesn't exist
-        # This might be useful for development environments, but less so for the packaged app.
-        logger.warning(f"Specified dotenv_path '{dotenv_path}' not found or not provided. Falling back to default load_dotenv behavior.")
-        load_dotenv(override=True) # Original call
+        logger.info(f"No .env file found at '{effective_dotenv_path}'. Using default configuration values.")
+        loaded_values = {} # Start with empty dict, defaults will apply
 
-    logger.debug(f"Attempting to load configuration values after load_dotenv(override=True, path='{dotenv_path}')")
-    logger.debug(f"RSYNC_OPTIONS from env: {os.getenv('RSYNC_OPTIONS')}") # Changed from RCLONE_OPTIONS
+    # Build config dictionary, applying loaded values over defaults
+    config = {}
+    config['source_dir'] = loaded_values.get('SOURCE_DIR', DEFAULT_CONFIG['source_dir'])
+    config['local_dir'] = loaded_values.get('LOCAL_DIR', DEFAULT_CONFIG['local_dir'])
+    config['sync_interval'] = int(loaded_values.get('SYNC_INTERVAL', DEFAULT_CONFIG['sync_interval']))
+    # Source Syncthing Instance
+    config['syncthing_api_address_source'] = loaded_values.get('SYNCTHING_API_ADDRESS_SOURCE', DEFAULT_CONFIG['syncthing_api_address_source'])
+    config['syncthing_gui_address_source'] = loaded_values.get('SYNCTHING_GUI_ADDRESS_SOURCE', DEFAULT_CONFIG['syncthing_gui_address_source'])
+    # config['syncthing_api_key_source'] = loaded_values.get('SYNCTHING_API_KEY_SOURCE', DEFAULT_CONFIG['syncthing_api_key_source']) # Removed
+    # Destination Syncthing Instance
+    config['syncthing_api_address_dest'] = loaded_values.get('SYNCTHING_API_ADDRESS_DEST', DEFAULT_CONFIG['syncthing_api_address_dest'])
+    config['syncthing_gui_address_dest'] = loaded_values.get('SYNCTHING_GUI_ADDRESS_DEST', DEFAULT_CONFIG['syncthing_gui_address_dest'])
+    # config['syncthing_api_key_dest'] = loaded_values.get('SYNCTHING_API_KEY_DEST', DEFAULT_CONFIG['syncthing_api_key_dest']) # Removed
+    config['watch_local_files'] = str(loaded_values.get('WATCH_LOCAL_FILES', str(DEFAULT_CONFIG['watch_local_files']))).lower() == 'true'
+    config['watch_delay_seconds'] = int(loaded_values.get('WATCH_DELAY_SECONDS', DEFAULT_CONFIG['watch_delay_seconds']))
+    config['start_at_login'] = str(loaded_values.get('START_AT_LOGIN', str(DEFAULT_CONFIG['start_at_login']))).lower() == 'true'
 
-    config = {
-        'remote_user': os.getenv('REMOTE_USER'),
-        'remote_host': os.getenv('REMOTE_HOST'),
-        'remote_port': os.getenv('REMOTE_PORT', '22'),
-        'remote_dir': os.getenv('REMOTE_DIR'),
-        'local_dir': os.getenv('LOCAL_DIR'),
-        'sync_interval': int(os.getenv('SYNC_INTERVAL', '5')),
-        'rsync_options': os.getenv('RSYNC_OPTIONS', '-avz --delete --progress'), # Changed from rclone_options
-        'use_mounted_volume': os.getenv('USE_MOUNTED_VOLUME', '').lower() == 'true',
-        'mounted_volume_path': os.getenv('MOUNTED_VOLUME_PATH', ''),
-        # 'enable_parallel_sync' is removed, parallelization handled by ProcessPoolExecutor
-        'parallel_processes': int(os.getenv('PARALLEL_PROCESSES', '4'))
-    }
+    # Add the flag indicating source
+    config['loaded_from_file'] = config_loaded_from_file
 
-    # Validate required config for SSH mode, less strict for mounted mode
-    required_keys = ['local_dir']
-    if not config['use_mounted_volume']:
-        required_keys.extend(['remote_user', 'remote_host', 'remote_dir'])
-    elif not config['mounted_volume_path']:
-         # If using mounted volume, the path must be set
-         required_keys.append('mounted_volume_path')
-    for key in required_keys:
-        if not config[key]:
-            raise ValueError(f"Missing required configuration: {key}")
-    
-    # Ensure remote_dir is properly formatted for shell commands
-    # Remove any extra quotes that might have been included in the env file
-    if config['remote_dir'].startswith('"') and config['remote_dir'].endswith('"'):
-        config['remote_dir'] = config['remote_dir'][1:-1]
-    elif config['remote_dir'].startswith("'") and config['remote_dir'].endswith("'"):
-        config['remote_dir'] = config['remote_dir'][1:-1]
-    
-    # Check for mounted volume usage
-    config['is_mounted'] = False
-    
-    # First priority: Use explicitly specified mounted volume path if provided
-    if config['mounted_volume_path'] and config['use_mounted_volume']:
-        if os.path.exists(config['mounted_volume_path']):
-            logger.info(f"Using explicitly configured mounted volume: {config['mounted_volume_path']}")
-            config['mounted_path'] = config['mounted_volume_path']
-            config['is_mounted'] = True
+    # --- Validation ---
+    # Only perform strict validation if the config was loaded from a file
+    # If using defaults, assume configuration is needed.
+    config['is_valid'] = False # Assume invalid until proven otherwise
+    config['validation_message'] = "Configuration not loaded from file. Please configure via Settings."
+    config['source_dir_exists'] = False # Default to false
+
+    if config_loaded_from_file:
+        # Essential keys if loaded from file: Source and Local directories
+        required_keys = ['source_dir', 'local_dir']
+        missing_keys = [key for key in required_keys if not config.get(key)]
+
+        if missing_keys:
+            config['validation_message'] = f"Missing required configuration: {', '.join(missing_keys)}"
+            logger.error(f"Configuration loaded from file is invalid: {config['validation_message']}")
         else:
-            logger.warning(f"Configured MOUNTED_VOLUME_PATH not found: {config['mounted_volume_path']}")
-            logger.warning("Will try auto-detection or fall back to SSH")
-    
-    # Second priority: Try auto-detection if mounted volume is enabled but path not specified or not found
-    if not config['is_mounted'] and config['use_mounted_volume']:
-        # Convert from remote path format (with escape characters) to local path format (without escapes)
-        raw_remote_dir = config['remote_dir'].replace('\\', '')  # Remove escape characters
-        mounted_path = raw_remote_dir.replace('volume1', 'Volumes')
-        
-        if os.path.exists(f"/{mounted_path}"):
-            logger.info(f"Using auto-detected mounted volume at /{mounted_path}")
-            config['mounted_path'] = f"/{mounted_path}"
-            config['is_mounted'] = True
-        else:
-            logger.warning(f"Could not auto-detect mounted volume at /{mounted_path}")
-            logger.debug(f"Path checked: /{mounted_path}")
-    
-    # If not using mounted volume, log that we're using SSH
-    if not config['is_mounted']:
-        logger.info("Not using mounted volume, will connect via SSH")
-    
-    logger.info("Configuration loaded:")
-    logger.info(f"  Remote: {config['remote_user']}@{config['remote_host']}:{config['remote_port']}")
-    logger.info(f"  Remote Directory: {config['remote_dir']}")
-    logger.info(f"  Local Directory: {config['local_dir']}")
+            # Check if the mounted volume path exists
+            if os.path.exists(config['source_dir']):
+                logger.info(f"Source directory exists: {config['source_dir']}")
+                config['source_dir_exists'] = True
+                config['is_valid'] = True # Configuration is valid
+                config['validation_message'] = "Configuration loaded and valid."
+                logger.info("Configuration loaded from file is valid.")
+            else:
+                # If the specified path doesn't exist, it's a fatal configuration error *for this loaded config*
+                config['validation_message'] = f"Configured SOURCE_DIR not found: {config['source_dir']}"
+                logger.error(f"Configuration loaded from file is invalid: {config['validation_message']}")
+                # Do not raise ValueError here, let the caller handle invalid state
+
+    # Log final configuration state
+    logger.info(f"Configuration State: {'Loaded from file' if config_loaded_from_file else 'Using defaults'}, Valid: {config['is_valid']}")
+    if not config['is_valid']:
+         logger.warning(f"Configuration issue: {config['validation_message']}")
+    # Log key values regardless of validity for debugging
+    logger.info(f"  Source Directory: {config['source_dir']}")
+    logger.info(f"  Local Directory (Destination): {config['local_dir']}")
     logger.info(f"  Sync Interval: {config['sync_interval']} minutes")
-    logger.info(f"  Using Mounted Volume: {config['is_mounted']}")
-    if config['is_mounted']:
-        logger.info(f"  Mounted Volume Path: {config['mounted_path']}")
-    
-    return config
+    logger.info(f"  Syncthing Source API: {config['syncthing_api_address_source']}")
+    logger.info(f"  Syncthing Source GUI: {config['syncthing_gui_address_source']}")
+    logger.info(f"  Syncthing Dest API: {config['syncthing_api_address_dest']}")
+    logger.info(f"  Syncthing Dest GUI: {config['syncthing_gui_address_dest']}")
+    logger.info(f"  Local File Watching: {config['watch_local_files']}")
+    if config['watch_local_files']:
+        logger.info(f"  File Watch Delay: {config['watch_delay_seconds']} seconds")
+    logger.info(f"  Start at Login: {config['start_at_login']}")
 
-def test_remote_connection(config):
-    """Test SSH connection to remote server"""
-    logger.info("Testing remote connection...")
-    cmd = [
-        'ssh',
-        f"{config['remote_user']}@{config['remote_host']}",
-        '-p', config['remote_port'],
-        'echo "Connection successful"'
-    ]
-    
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=5
-        )
-        logger.info("Remote connection successful")
-        return True
-    except subprocess.TimeoutExpired:
-        logger.error("Remote connection timed out")
-        return False
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Remote connection failed: {e.stderr}")
-        return False
+    return config # Return the dictionary, caller checks 'is_valid'
+
+# Removed test_remote_connection (SSH specific, only used for initial check, not core sync)
 
 def find_livework_dirs(config):
     """Find directories with .livework files on the remote server or mounted volume"""
     logger.info("Scanning for .livework files")
     
-    livework_dirs = []
-    
-    # If the volume is mounted locally, search directly on the filesystem
-    if config.get('is_mounted', False):
-        mounted_path = config['mounted_path']
-        logger.info(f"Searching for .livework files in mounted volume: {mounted_path}")
-        
-        try:
-            # Log the top-level directory contents for debugging
-            logger.debug(f"Contents of mounted directory: {mounted_path}")
+    livework_source_dirs = []
+    source_dir = config.get('source_dir') # Get the configured source directory
+
+    if not source_dir:
+        logger.error("Source directory configuration is missing, cannot scan for .livework files.")
+        return []
+
+    logger.info(f"Searching for .livework files in source directory: {source_dir}")
+
+    try:
+        # Log the top-level directory contents for debugging
+        if os.path.exists(source_dir):
+            logger.debug(f"Contents of source directory: {source_dir}")
             try:
-                entries = os.listdir(mounted_path)
+                entries = os.listdir(source_dir)
                 for entry in entries:
                     logger.debug(f"  - {entry}")
             except Exception as e:
-                logger.error(f"Error listing mounted directory contents: {e}")
+                logger.error(f"Error listing source directory contents: {e}")
             
             # Walk the directory tree to find .livework files
             logger.info("Beginning directory walk to find .livework files...")
-            for root, dirs, files in os.walk(mounted_path):
+            for root, dirs, files in os.walk(source_dir):
                 logger.debug(f"Checking directory: {root}")
                 # Check for both '.livework' (hidden) and 'livework' (visible) files
                 if '.livework' in files or 'livework' in files:
-                    livework_dirs.append(root)
+                    livework_source_dirs.append(root)
                     logger.info(f"Found .livework in: {root}")
             
-            logger.info(f"Found {len(livework_dirs)} directories with .livework files")
-            return livework_dirs
-            
-        except Exception as e:
-            logger.error(f"Error finding .livework directories in mounted volume: {str(e)}")
-            return []
-    
-    # Otherwise, use SSH to find the directories
-    else:
-        logger.info("Scanning for .livework files on remote server")
-        
-        # Use a more robust command that properly handles paths with spaces and special characters
-        # The command first changes to the remote directory, then finds .livework files
-        # relative to that location to avoid path issues
-        # Use single quotes around the path for better shell escaping
-        remote_dir = config['remote_dir'].replace('"', '\\"')
-        
-        cmd = [
-            'ssh',
-            f"{config['remote_user']}@{config['remote_host']}",
-            '-p', config['remote_port'],
-            f"cd '{remote_dir}' && find . -name '.livework' -type f | xargs -I{{}} dirname {{}}"
-        ]
-        
-        logger.debug(f"Find command: {' '.join(cmd)}")
-        
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            
-            # Process relative paths (they'll start with ./)
-            for line in result.stdout.splitlines():
-                if line.strip():
-                    # Convert relative path to absolute
-                    rel_path = line.strip()
-                    abs_path = os.path.normpath(os.path.join(config['remote_dir'], rel_path))
-                    livework_dirs.append(abs_path)
-                    logger.info(f"Found .livework in: {abs_path}")
-                    
-            logger.info(f"Found {len(livework_dirs)} directories with .livework files")
-            return livework_dirs
-        
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error finding .livework directories: {str(e)}")
-            logger.error(f"Error output: {e.stderr}")
-            return []
-
-def list_remote_directory(config):
-    """List contents of remote directory or mounted volume"""
-    if config.get('is_mounted', False):
-        mounted_path = config['mounted_path']
-        logger.info(f"Listing contents of mounted directory: {mounted_path}")
-        
-        try:
-            # List the directory contents
-            entries = os.listdir(mounted_path)
-            logger.info("Mounted directory contents:")
-            for entry in entries:
-                logger.info(f"  {entry}")
-            return True
-        except Exception as e:
-            logger.error(f"Error listing mounted directory: {str(e)}")
-            return False
-    else:
-        logger.info(f"Listing contents of remote directory: {config['remote_dir']}")
-        
-        # Use single quotes around the path for better shell escaping
-        remote_dir = config['remote_dir'].replace('"', '\\"')
-        
-        cmd = [
-            'ssh',
-            f"{config['remote_user']}@{config['remote_host']}",
-            '-p', config['remote_port'],
-            f"ls -la '{remote_dir}'"
-        ]
-        
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            logger.info("Remote directory contents:")
-            logger.info(result.stdout)
-            return True
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error listing remote directory: {e.stderr}")
-            return False
-
-def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None):
-    """
-    Sync a specific remote directory to a local directory using rsync.
-
-    Args:
-        remote_dir_info (tuple): A tuple containing (index, remote_path).
-        local_base_dir (str): The base local directory to sync into.
-        config (dict): The loaded configuration dictionary.
-        progress_queue (multiprocessing.Queue, optional): Queue to send progress updates.
-
-    Returns:
-        tuple: (remote_path, result_data) where result_data contains success status and details.
-    """
-    index, remote_path = remote_dir_info
-    project_name = os.path.basename(remote_path) # Get project name for reporting
-    rsync_executable = shutil.which('rsync') or 'rsync' # Find rsync or default
-
-    # Calculate the relative path from the base remote directory or mounted path
-    if config['is_mounted']:
-        base_path = config['mounted_path']
-    else:
-        base_path = config['remote_dir'] # Use the configured remote base for SSH
-
-    if remote_path == base_path:
-        rel_path = '.'
-    else:
-        try:
-            # Use relpath carefully, ensuring both paths are absolute or relative consistently
-            # For SSH, remote_path is absolute, base_path might need adjustment if not absolute
-            # For mounted, both should be absolute paths
-            rel_path = os.path.relpath(remote_path, base_path)
-        except ValueError:
-            rel_path = os.path.basename(remote_path) # Fallback
-
-    local_path = os.path.join(local_base_dir, rel_path)
-
-    # Ensure the local target directory exists
-    os.makedirs(local_path, exist_ok=True)
-
-    # Construct rsync command
-    rsync_opts_str = config['rsync_options']
-    # Use shlex to split options correctly, handling quotes
-    try:
-        import shlex
-        # Add progress flags, itemize changes, and --no-i-r
-        # -i (--itemize-changes) gives per-file output
-        # --info=progress2 gives machine-readable progress
-        # --no-i-r recommended with progress2
-        rsync_opts_list = shlex.split(rsync_opts_str) + ['--info=progress2', '--no-i-r', '-i']
-    except ImportError:
-        # Fallback for environments without shlex
-        rsync_opts_list = rsync_opts_str.split() + ['--info=progress2', '--no-i-r', '-i']
-
-    rsync_cmd = [rsync_executable] + rsync_opts_list
-
-    # Define source and destination
-    # Ensure trailing slashes for directory content sync
-    dest = local_path.rstrip('/') + '/'
-
-    if config['is_mounted']:
-        source = remote_path.rstrip('/') + '/'
-        logger.info(f"Performing rsync (mounted): {source} -> {dest}")
-    else: # SSH mode
-        # Escape spaces and special characters for SSH path
-        # Using shlex.quote is safer if available
-        try:
-            import shlex
-            escaped_remote_path = shlex.quote(remote_path.rstrip('/'))
-        except ImportError:
-            # Basic escaping for spaces if shlex not available
-            escaped_remote_path = remote_path.replace(' ', '\\ ')
-
-        source = f"{config['remote_user']}@{config['remote_host']}:{escaped_remote_path}/"
-        # Add SSH options (port)
-        rsync_cmd.extend(['-e', f"ssh -p {config['remote_port']}"])
-        logger.info(f"Performing rsync (SSH): {source} -> {dest}")
-
-    rsync_cmd.extend([source, dest])
-
-    logger.debug(f"Rsync command for '{remote_path}': {' '.join(rsync_cmd)}")
-
-    # --- Report Start ---
-    if progress_queue:
-        try:
-            progress_queue.put({'type': 'start', 'project': project_name, 'path': remote_path})
-        except Exception as q_err:
-            logger.error(f"Failed to put start message on queue for {project_name}: {q_err}")
-    # --- End Report Start ---
-
-    success = False # Default to failure
-    synced_files = [] # List to store transferred files
-    error_message = "" # Store specific error message
-    process = None
-    try:
-        # Use Popen to stream output
-        logger.debug(f"Starting Popen for: {' '.join(rsync_cmd)}")
-        process = subprocess.Popen(
-            rsync_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, # Capture stderr too
-            text=True,
-            bufsize=1,  # Line buffered
-            env=os.environ.copy()
-        )
-
-        # Regexes for parsing output
-        # Progress: "         32768   0% ..." or "   131072000  99% ..."
-        progress_regex = re.compile(r'\s+(\d+)%\s+')
-        # Itemize changes: ">f+++++++++ filename" (sent), "<f.st...... filename" (deleted), ".d..t...... dirname/" (dir properties)
-        # We only care about sent/updated files (lines starting with >f)
-        itemize_regex = re.compile(r'^>f[+.]') # Matches files being sent or updated locally
-        last_reported_percentage = -1
-
-        # Read stdout line by line
-        logger.debug(f"Reading stdout for {project_name}...")
-        if process.stdout:
-            while True:
-                line = process.stdout.readline()
-                if not line:
-                    # If readline returns empty, check if the process has finished.
-                    if process.poll() is not None:
-                        logger.debug(f"End of stdout stream and process terminated for {project_name}.")
-                        break # End of stream and process finished
-                    else:
-                        # Process still running, but no output right now, wait briefly
-                        time.sleep(0.05)
-                        continue
-
-                line_strip = line.strip()
-                if not line_strip: # Skip empty lines
-                    continue
-
-                logger.debug(f"rsync raw ({project_name}): {line_strip}") # Log raw output for debugging
-
-                # Check for progress update
-                progress_match = progress_regex.search(line)
-                if progress_match:
-                    percentage = int(progress_match.group(1))
-                    # Only report if percentage changes to avoid flooding the queue
-                    if percentage != last_reported_percentage:
-                        logger.debug(f"Parsed progress for {project_name}: {percentage}%")
-                        if progress_queue:
-                            try:
-                                progress_queue.put({
-                                    'type': 'progress',
-                                    'project': project_name,
-                                    'path': remote_path,
-                                    'percentage': percentage
-                                })
-                                last_reported_percentage = percentage
-                            except Exception as q_err:
-                                logger.error(f"Failed to put progress message on queue for {project_name}: {q_err}")
-                    continue # Progress lines don't contain itemize info
-
-                # Check for itemized change (file transfer)
-                # Example: >f+++++++++ my_document.txt
-                if itemize_regex.match(line):
-                    # Extract filename (part after the 11-char code and space)
-                    filename = line[12:].strip()
-                    if filename:
-                        synced_files.append(filename)
-                        logger.debug(f"Tracked synced file for {project_name}: {filename}")
-
-        # Wait for the process to finish and get the exit code and stderr
-        logger.debug(f"Waiting for rsync process to complete for {project_name}...")
-        stdout_final, stderr_final = process.communicate() # Get any remaining output/errors
-        return_code = process.returncode
-        logger.debug(f"Rsync process for {project_name} finished with code: {return_code}")
-
-        # Log any final stderr output
-        if stderr_final:
-            stderr_final_strip = stderr_final.strip()
-            logger.debug(f"rsync final stderr for {remote_path}:\n{stderr_final_strip}")
-            # Store stderr as potential error message, unless it's just stats
-            # (rsync often prints stats to stderr even on success)
-            if return_code != 0 or "total size is" not in stderr_final_strip:
-                 error_message = stderr_final_strip
-
-        if return_code == 0:
-            logger.info(f"Successfully synced {remote_path} -> {local_path}")
-            success = True
+            logger.info(f"Found {len(livework_source_dirs)} directories with .livework files.")
         else:
-            logger.error(f"Rsync failed for {remote_path} -> {local_path}. Exit Code: {return_code}")
-            logger.error(f"Command: {' '.join(rsync_cmd)}") # Log the command used
-            # Use captured stderr if available, otherwise provide generic message
-            if not error_message:
-                 error_message = f"Rsync failed with exit code {return_code}."
-            logger.error(f"Error details: {error_message}")
-            success = False
+             logger.error(f"Source directory does not exist: {source_dir}")
+             return []
 
     except Exception as e:
-        logger.error(f"Unexpected error during rsync {remote_path} -> {local_path}: {str(e)}")
-        logger.exception("Traceback:")
-        success = False
-        error_message = f"Unexpected Python error: {str(e)}" # Store Python exception message
-        # Ensure process is terminated if it's still running after an exception
-        if process and process.poll() is None:
-            try:
-                logger.warning(f"Terminating runaway rsync process for {project_name} due to exception.")
-                process.terminate()
-                process.wait(timeout=5) # Wait a bit for termination
-            except:
-                logger.warning(f"Force killing runaway rsync process for {project_name}.")
-                process.kill() # Force kill if terminate fails
-    finally:
-        # --- Report End ---
-        if progress_queue:
-            try:
-                # Put end message on queue
-                progress_queue.put({'type': 'end', 'project': project_name, 'path': remote_path, 'success': success, 'error': error_message if not success else None})
-            except Exception as q_err:
-                logger.error(f"Failed to put end message on queue for {project_name}: {q_err}")
-        # --- End Report End ---
+        logger.error(f"Error finding .livework directories in source directory: {str(e)}")
+        return []
 
-    # Return detailed result dictionary
-    result_data = {'success': success}
-    if success:
-        result_data['synced_files'] = synced_files
-    else:
-        result_data['error'] = error_message
-        # TODO: Add more robust lock file detection here if needed based on error_message
-        # Example basic check (might need refinement):
-        # if "lock file" in error_message.lower():
-        #    result_data['error_type'] = 'lock_file'
-        #    result_data['path'] = remote_path # Assuming path needed for lock removal
+    return livework_source_dirs
 
-    return (remote_path, result_data) # Return path and result dictionary
+# Removed list_remote_directory (SSH specific, not core sync)
+# Removed sync_directory (rsync specific)
+# Removed perform_sync (rsync specific)
 
-def perform_sync(progress_queue=None):
+# --- New Syncthing Configuration Update Logic ---
+from .syncthing_manager import SyncthingApiClient # Keep API client import
+# Define APP_NAME here if not already defined globally in this file
+APP_NAME = "TurboSync"
+
+def update_syncthing_configuration(api_client_source: SyncthingApiClient, api_client_dest: SyncthingApiClient):
     """
-    Main function to perform synchronization using rsync, potentially in parallel.
+    Finds .livework directories, compares with current Syncthing config,
+    and updates BOTH local Syncthing daemon configurations via API to sync
+    the corresponding folders between them.
 
     Args:
-        progress_queue (multiprocessing.Queue, optional): Queue for sending progress updates.
-
-    Returns:
-        dict: A dictionary mapping remote directory paths to their sync result data.
-              Returns None if a configuration error or major exception occurs.
+        api_client_source: Initialized SyncthingApiClient for the source instance.
+        api_client_dest: Initialized SyncthingApiClient for the destination instance.
     """
-    import shutil # Ensure shutil is imported for which()
+    logger.info("Starting Syncthing configuration update process...")
+    config_updated = False
+    error_occurred = False
+    message = "Configuration update check completed."
+
     try:
-        # Use the user-specific .env path consistently
-        user_env_path = os.path.join(os.path.expanduser(f'~/Library/Application Support/TurboSync'), '.env')
-        config = load_config(dotenv_path=user_env_path)
+        # Check if API clients are provided
+        if not api_client_source or not api_client_dest:
+             raise ValueError("API clients for source and destination instances are required.")
 
-        # Check if rsync executable exists
-        rsync_path = shutil.which('rsync')
-        if not rsync_path:
-             # Try common paths if not in PATH (especially relevant in bundled app)
-             common_paths = ['/usr/bin/rsync']
-             for p in common_paths:
-                 if os.path.exists(p):
-                     rsync_path = p
+        # 1. Load TurboSync Configuration
+        user_env_path = os.path.join(os.path.expanduser(f'~/Library/Application Support/{APP_NAME}'), '.env')
+        config = load_config(dotenv_path=user_env_path) # load_config now returns dict always
+
+        # --- Check if config is valid before proceeding ---
+        if not config or not config.get('is_valid'):
+             message = config.get('validation_message', "Configuration is invalid or missing.")
+             logger.error(f"Cannot update Syncthing configuration: {message}")
+             # Return error state without raising exception here, let caller handle UI
+             return False, f"Config Error: {message}"
+
+        # Config is valid, proceed with extracting values
+        local_base_dir = config['local_dir']
+        source_base_dir = config['source_dir'] # Renamed from mounted_path
+
+        # API Clients are passed in, no need to initialize here
+
+        # 3. Find .livework Directories
+        logger.info("Scanning for .livework directories...")
+        livework_source_paths = find_livework_dirs(config) # Returns paths on the source volume
+        if not livework_source_paths:
+            logger.warning("No .livework directories found.")
+            # Decide if we should remove all folders from Syncthing config in this case?
+            # For now, just log and proceed to check existing config.
+            # TODO: Implement removal logic if desired.
+
+        # Map found source paths (from mounted volume) to desired local paths and folder IDs
+        desired_folders = {} # {folder_id: {'dest_path': '/path/to/local', 'source_path': '/path/to/source'}}
+
+        for source_path in livework_source_paths: # Variable name kept for now, but it's the source path on the mount
+            # Derive local path relative to the local_base_dir
+            if source_path == source_base_dir:
+                rel_path = '.' # Sync the base directory itself if it has .livework
+            else:
+                try:
+                    # Calculate path relative to the base of the mounted volume
+                    rel_path = os.path.relpath(source_path, source_base_dir)
+                except ValueError as e:
+                    # This might happen if paths are fundamentally different (e.g., different drives on Windows, though unlikely here)
+                    rel_path = os.path.basename(source_path)
+                    logger.warning(f"Could not determine relative path for '{source_path}' relative to '{source_base_dir}'. Using basename '{rel_path}'. Error: {e}")
+
+            local_path = os.path.normpath(os.path.join(local_base_dir, rel_path))
+            # Create a reasonably unique folder ID (e.g., based on relative path)
+            # Replace path separators with underscores for Syncthing ID compatibility
+            # Ensure ID is valid (Syncthing IDs have restrictions)
+            folder_id = re.sub(r'[\\/:"*?<>|]+', '_', rel_path) # Replace invalid chars
+            folder_id = folder_id.replace(' ', '_').replace('.', '_livework') # Replace space and dot
+            if not folder_id or folder_id == '_livework': # Handle base directory case
+                 # Use basename of the *source* dir for uniqueness if base is synced
+                 base_name = os.path.basename(source_base_dir) or "source_base"
+                 folder_id = base_name + '_livework_base'
+            # Truncate if too long (Syncthing might have limits) - adjust limit as needed
+            folder_id = folder_id[:64] # Example limit
+
+            # Ensure local directory exists (Syncthing Destination instance needs it)
+            os.makedirs(local_path, exist_ok=True)
+            # Source directory already exists (it's where we found .livework)
+
+            # Store both paths for the folder ID
+            desired_folders[folder_id] = {'dest_path': local_path, 'source_path': source_path}
+            logger.debug(f"Desired folder: ID='{folder_id}', Dest='{local_path}', Source='{source_path}'")
+
+        # 4. Get Current Syncthing Configuration
+        # Fetch config for BOTH instances using the provided clients
+        logger.info("Fetching current Syncthing configurations via API...")
+        current_config_source = api_client_source.get_config()
+        current_config_dest = api_client_dest.get_config()
+        if current_config_source is None or current_config_dest is None:
+             raise ConnectionError("Failed to fetch current Syncthing configuration from one or both APIs.")
+
+
+        # Make a deep copy to modify safely
+        import copy
+        new_config_source = copy.deepcopy(current_config_source)
+        new_config_dest = copy.deepcopy(current_config_dest)
+        if 'folders' not in new_config_source: new_config_source['folders'] = []
+        if 'devices' not in new_config_source: new_config_source['devices'] = []
+        if 'folders' not in new_config_dest: new_config_dest['folders'] = []
+        if 'devices' not in new_config_dest: new_config_dest['devices'] = []
+
+
+        # 5. Get Local Device ID
+        # Get Device IDs for BOTH local instances using the provided clients
+        device_id_source = None
+        device_id_dest = None
+
+        status_source = api_client_source.get_system_status() # Need a get_system_status method
+        if status_source and 'myID' in status_source:
+            device_id_source = status_source['myID']
+            logger.info(f"Got Source Syncthing Device ID: {device_id_source}")
+        else:
+            raise ConnectionError("Could not determine Source Syncthing Device ID from API.")
+
+        status_dest = api_client_dest.get_system_status() # Need a get_system_status method
+        if status_dest and 'myID' in status_dest:
+            device_id_dest = status_dest['myID']
+            logger.info(f"Got Destination Syncthing Device ID: {device_id_dest}")
+        else:
+            raise ConnectionError("Could not determine Destination Syncthing Device ID from API.")
+
+        # 6. Compare and Update Folders
+        # --- Update Source Instance Folders ---
+        current_folder_ids_source = {f.get('id') for f in new_config_source['folders']}
+        desired_folder_ids = set(desired_folders.keys()) # Same desired folders for both
+
+        folders_to_add_source = desired_folder_ids - current_folder_ids_source
+        folders_to_remove_source = current_folder_ids_source - desired_folder_ids
+        folders_to_keep_source = current_folder_ids_source.intersection(desired_folder_ids)
+
+        # Remove folders no longer desired (Source)
+        if folders_to_remove_source:
+            logger.info(f"Removing {len(folders_to_remove_source)} folders from Source Syncthing config: {folders_to_remove_source}")
+            new_config_source['folders'] = [f for f in new_config_source['folders'] if f.get('id') not in folders_to_remove_source]
+            config_updated = True # Mark that *some* config changed
+
+        # Add new folders (Source)
+        for folder_id in folders_to_add_source:
+            source_path = desired_folders[folder_id]['source_path']
+            logger.info(f"Adding folder '{folder_id}' ({source_path}) to Source Syncthing config.")
+            SyncthingApiClient.add_folder_to_config(
+                new_config_source,
+                folder_id,
+                source_path, # Use source path for source instance
+                devices=[device_id_dest] # Share with Destination instance
+            )
+            config_updated = True
+
+        # Update existing folders (Source)
+        for folder_id in folders_to_keep_source:
+             for i, folder in enumerate(new_config_source['folders']):
+                 if folder.get('id') == folder_id:
+                     # Ensure path matches
+                     expected_source_path = desired_folders[folder_id]['source_path']
+                     if folder.get('path') != expected_source_path:
+                          logger.warning(f"Updating path for existing folder '{folder_id}' in Source config: '{folder.get('path')}' -> '{expected_source_path}'")
+                          new_config_source['folders'][i]['path'] = expected_source_path
+                          config_updated = True
+
+                     # Ensure it's shared with the Destination device
+                     shared_devices = {d.get('deviceID') for d in folder.get('devices', [])}
+                     if device_id_dest not in shared_devices:
+                         logger.info(f"Sharing existing folder '{folder_id}' in Source config with Dest device '{device_id_dest}'.")
+                         if 'devices' not in new_config_source['folders'][i]:
+                             new_config_source['folders'][i]['devices'] = []
+                         # Ensure the device entry is a dict
+                         if not any(isinstance(d, dict) and d.get('deviceID') == device_id_dest for d in new_config_source['folders'][i]['devices']):
+                              new_config_source['folders'][i]['devices'].append({'deviceID': device_id_dest})
+                              config_updated = True
                      break
-        if not rsync_path:
-            logger.error("rsync executable not found in PATH or common locations (/usr/bin/rsync). Please install rsync.")
-            # Consider notifying the user via menubar if possible here
-            return None
 
-        logger.info(f"Using rsync executable at: {rsync_path}")
+        # --- Update Destination Instance Folders ---
+        current_folder_ids_dest = {f.get('id') for f in new_config_dest['folders']}
+        # desired_folder_ids is the same
+
+        folders_to_add_dest = desired_folder_ids - current_folder_ids_dest
+        folders_to_remove_dest = current_folder_ids_dest - desired_folder_ids
+        folders_to_keep_dest = current_folder_ids_dest.intersection(desired_folder_ids)
+
+        # Remove folders no longer desired (Dest)
+        if folders_to_remove_dest:
+            logger.info(f"Removing {len(folders_to_remove_dest)} folders from Dest Syncthing config: {folders_to_remove_dest}")
+            new_config_dest['folders'] = [f for f in new_config_dest['folders'] if f.get('id') not in folders_to_remove_dest]
+            config_updated = True # Mark that *some* config changed
+
+        # Add new folders (Dest)
+        for folder_id in folders_to_add_dest:
+            dest_path = desired_folders[folder_id]['dest_path']
+            logger.info(f"Adding folder '{folder_id}' ({dest_path}) to Dest Syncthing config.")
+            SyncthingApiClient.add_folder_to_config(
+                new_config_dest,
+                folder_id,
+                dest_path, # Use destination path for destination instance
+                devices=[device_id_source] # Share with Source instance
+            )
+            config_updated = True
+
+        # Update existing folders (Dest)
+        for folder_id in folders_to_keep_dest:
+             for i, folder in enumerate(new_config_dest['folders']):
+                 if folder.get('id') == folder_id:
+                     # Ensure path matches
+                     expected_dest_path = desired_folders[folder_id]['dest_path']
+                     if folder.get('path') != expected_dest_path:
+                          logger.warning(f"Updating path for existing folder '{folder_id}' in Dest config: '{folder.get('path')}' -> '{expected_dest_path}'")
+                          new_config_dest['folders'][i]['path'] = expected_dest_path
+                          config_updated = True
+                     # Ensure it's shared with the Source device
+                     shared_devices_dest = {d.get('deviceID') for d in folder.get('devices', [])}
+                     if device_id_source not in shared_devices_dest:
+                         logger.info(f"Sharing existing folder '{folder_id}' in Dest config with Source device '{device_id_source}'.")
+                         if 'devices' not in new_config_dest['folders'][i]:
+                             new_config_dest['folders'][i]['devices'] = []
+                         # Ensure the device entry is a dict
+                         if not any(isinstance(d, dict) and d.get('deviceID') == device_id_source for d in new_config_dest['folders'][i]['devices']):
+                              new_config_dest['folders'][i]['devices'].append({'deviceID': device_id_source})
+                              config_updated = True
+                     break
+
+        # 7. Ensure Remote Device Exists
+        # Ensure BOTH instances know about EACH OTHER's device ID
+        # Check Source config for Dest device
+        current_device_ids_source = {d.get('deviceID') for d in new_config_source['devices']}
+        if device_id_dest not in current_device_ids_source:
+            logger.info(f"Adding Dest device '{device_id_dest}' to Source Syncthing config.")
+            SyncthingApiClient.add_device_to_config( # Use add_device_to_config helper
+                new_config_source,
+                device_id_dest,
+                f"TurboSync Peer (Dest - {device_id_dest[:7]}...)"
+            )
+            config_updated = True
+
+        # Check Dest config for Source device
+        current_device_ids_dest = {d.get('deviceID') for d in new_config_dest['devices']}
+        if device_id_source not in current_device_ids_dest:
+             logger.info(f"Adding Source device '{device_id_source}' to Dest Syncthing config.")
+             SyncthingApiClient.add_device_to_config( # Use add_device_to_config helper
+                 new_config_dest,
+                 device_id_source,
+                 f"TurboSync Peer (Source - {device_id_source[:7]}...)"
+             )
+             config_updated = True
 
 
-        # Validate connection or mounted path based on mode
-        if config['is_mounted']:
-            if not os.path.exists(config['mounted_path']):
-                logger.error(f"Mounted path not accessible: {config['mounted_path']}")
-                return None
-            logger.info(f"Confirmed mounted path exists: {config['mounted_path']}")
-        else: # SSH mode
-            if not test_remote_connection(config): # Keep connection test for SSH
-                 logger.error("Remote SSH connection test failed. Cannot proceed with sync.")
-                 return None
+        # 8. Apply Configuration Changes (if any)
+        # --- RE-ENABLED CONFIG UPDATE ---
+        if config_updated:
+            logger.info("Applying updated configuration to Syncthing instances via API...")
+            # Apply updates to BOTH instances using the provided clients
+            success_source = api_client_source.update_config(new_config_source)
+            success_dest = api_client_dest.update_config(new_config_dest)
 
-        # Ensure local directory exists
-        os.makedirs(config['local_dir'], exist_ok=True)
+            if success_source is None or success_dest is None: # Check for API request failure on either
+                 message = "Error: Failed to apply updated Syncthing configuration via API to one or both instances."
+                 logger.error(message)
+                 error_occurred = True
+            else:
+                 # Use the variables calculated for the source instance (should be same count for dest)
+                 message = f"Syncthing configuration updated successfully. Added: {len(folders_to_add_source)}, Removed: {len(folders_to_remove_source)}."
+                 logger.info(message)
+                 # Optional: Trigger a restart if needed, though Syncthing often reloads config automatically
+                 # api_client.restart_syncthing()
+        else:
+            message = "No Syncthing configuration changes needed."
+            logger.info(message)
+        # --- END RE-ENABLE ---
 
-        # Find directories with .livework files
-        livework_dirs = find_livework_dirs(config)
-
-        if not livework_dirs:
-            logger.warning("No .livework directories found to sync.")
-            return {} # Return empty dict, no syncs attempted
-
-        logger.info(f"Found {len(livework_dirs)} directories containing .livework to sync.")
-
-        # Use ProcessPoolExecutor for parallel execution
-        max_workers = config.get('parallel_processes', 1) # Default to 1 if not set
-        logger.info(f"Starting parallel sync with up to {max_workers} processes...")
-        sync_results = {}
-        tasks = [(i, dir_path) for i, dir_path in enumerate(livework_dirs)]
-
-        # Use 'spawn' context if available for better compatibility across platforms
-        mp_context = multiprocessing.get_context('spawn')
-        with ProcessPoolExecutor(max_workers=max_workers, mp_context=mp_context) as executor:
-            # Map sync_directory function over the directories
-            # Pass necessary arguments using functools.partial, including the queue
-            from functools import partial
-            sync_func = partial(sync_directory,
-                                local_base_dir=config['local_dir'],
-                                config=config,
-                                progress_queue=progress_queue) # Pass the progress_queue here
-
-            # Execute tasks and gather results as they complete
-            results_iterator = executor.map(sync_func, tasks)
-
-            for remote_path, result_data in results_iterator:
-                sync_results[remote_path] = result_data # Store the whole dict
-                status = "succeeded" if result_data['success'] else "failed"
-                logger.info(f"Sync task for {remote_path} {status}.")
-
-
-        successful_syncs = sum(1 for res in sync_results.values() if res['success'])
-        total_dirs = len(livework_dirs)
-        logger.info(f"Parallel sync completed. {successful_syncs}/{total_dirs} directories synced successfully.")
-        return sync_results
-
-    except ValueError as e: # Catch config loading errors
-        logger.error(f"Configuration error during sync process: {str(e)}")
-        return None # Indicate general failure
+    except ValueError as e: # Catch config loading errors or API key issues
+        logger.error(f"Configuration error during Syncthing update: {str(e)}")
+        message = f"Config Error: {str(e)}"
+        error_occurred = True
+    except ConnectionError as e:
+        logger.error(f"API connection error during Syncthing update: {str(e)}")
+        message = f"API Error: {str(e)}"
+        error_occurred = True
     except Exception as e:
-        logger.error(f"Unexpected error during perform_sync: {str(e)}")
-        logger.exception("Traceback:") # Log full traceback
-        return None # Indicate general failure
+        logger.error(f"Unexpected error during Syncthing configuration update: {str(e)}")
+        logger.exception("Traceback:")
+        message = f"Unexpected Error: {str(e)}"
+        error_occurred = True
+
+    logger.info(f"Syncthing configuration update finished. Status: {'Error' if error_occurred else 'OK'}, Message: {message}")
+    return not error_occurred, message # Return success status and message

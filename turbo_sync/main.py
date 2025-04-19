@@ -74,86 +74,28 @@ USER_ENV_PATH = os.path.join(USER_CONFIG_DIR, '.env')
 
 # Removed get_resource_path function (moved to utils.py)
 
-def ensure_env_file():
-    """Ensure the .env file exists in the user config dir, create it from template if it doesn't"""
-    logging.debug(f"Checking for user .env file at {USER_ENV_PATH}")
-    os.makedirs(USER_CONFIG_DIR, exist_ok=True) # Ensure the directory exists
-
-    if not os.path.exists(USER_ENV_PATH):
-        logging.info(f"User .env file not found at {USER_ENV_PATH}, creating from template.")
+def ensure_config_dir():
+    """Ensure the user configuration directory exists."""
+    logging.debug(f"Ensuring user config directory exists at {USER_CONFIG_DIR}")
+    try:
+        os.makedirs(USER_CONFIG_DIR, exist_ok=True) # Ensure the directory exists
+        logging.debug(f"User config directory confirmed: {USER_CONFIG_DIR}")
+        return True
+    except Exception as e:
+        logging.exception(f"Failed to create or access user config directory: {USER_CONFIG_DIR}")
+        # Show a critical error if the directory cannot be created/accessed
         try:
-            # Find the bundled template file
-            template_path = get_resource_path(".env.template")
-            logging.debug(f"Template path resolved to: {template_path}") # Log resolved path
-
-            if not template_path or not os.path.exists(template_path): # Check existence *before* copy
-                 logging.error(f"Bundled .env.template not found or path invalid: {template_path}")
-                 # Fallback: Create a basic default if template is missing (should not happen)
-                 logging.warning("Creating basic default .env as template was missing.")
-                 template_content = """# Remote server configuration (DEFAULT - TEMPLATE MISSING)
-REMOTE_USER=username
-REMOTE_HOST=example.com
-REMOTE_PORT=22
-REMOTE_DIR=/path/to/remote/directory
-
-# Use mounted volume instead of SSH (if volume is mounted in Finder)
-USE_MOUNTED_VOLUME=false
-# Direct path to mounted volume in Finder (leave empty if not using mounted volume)
-MOUNTED_VOLUME_PATH=
-
-# Local directory to sync to
-LOCAL_DIR=/path/to/local/directory
-
-# Sync interval in minutes
-SYNC_INTERVAL=5
-
-# Watch local files for changes
-WATCH_LOCAL_FILES=true
-WATCH_DELAY_SECONDS=2
- 
-# Rsync options - standard flags
-RSYNC_OPTIONS="-avz --delete --progress --exclude='.*' --exclude='node_modules/'"
- 
-# Parallel sync (multiple connections)
-PARALLEL_PROCESSES=4
-"""
-                 with open(USER_ENV_PATH, 'w') as f_user:
-                     f_user.write(template_content)
-                 logging.warning(f"Created basic default .env at {USER_ENV_PATH} as template was missing.")
-            else:
-                # Copy the bundled template to the user config directory
-                logging.debug(f"Attempting to copy template from '{template_path}' to '{USER_ENV_PATH}'")
-                shutil.copy2(template_path, USER_ENV_PATH)
-                # Verify copy by checking destination existence
-                if os.path.exists(USER_ENV_PATH):
-                    logging.info(f"Successfully copied template to {USER_ENV_PATH}")
-                else:
-                    logging.error(f"Copy attempted, but destination file still not found at {USER_ENV_PATH}")
-
-            # REMOVED: os.system(f"open {USER_ENV_PATH}") - Settings are now handled via dialog
-
-            # Show message to user
             import rumps
-            rumps.notification(
-                "TurboSync Setup",
-                "Configuration Required",
-                f"Please edit the .env file located at {USER_ENV_PATH} with your settings.",
-                sound=True
+            rumps.alert(
+                title="TurboSync Critical Error",
+                message=f"Could not create or access the configuration directory:\n{USER_CONFIG_DIR}\n\nPlease check permissions.\nError: {e}"
             )
-            return False # Indicate setup is needed
-        except Exception as e:
-            logging.exception(f"Failed to create user .env file: {e}")
-            import rumps
-            rumps.notification(
-                "TurboSync Error",
-                "Configuration Error",
-                f"Could not create the configuration file at {USER_ENV_PATH}. Check logs.",
-                sound=True
-            )
-            return False # Indicate failure
+        except Exception as alert_e:
+            logging.error(f"Failed to show rumps alert for config dir error: {alert_e}")
+            print(f"CRITICAL ERROR: Could not create/access config directory {USER_CONFIG_DIR}. Check permissions. Error: {e}", file=sys.stderr)
+        return False # Indicate critical failure
 
-    logging.debug(f"User .env file found at {USER_ENV_PATH}")
-    return True # Indicate .env exists and is ready
+# Removed the old ensure_env_file logic that copied the template
 
 def setup_icon():
     """Ensure the icon file path is correctly determined for the menubar app."""
@@ -182,73 +124,55 @@ def setup_icon():
              return None # Indicate icon is missing
 
 def check_dependencies():
-    """Check if required external dependencies are available"""
-    logging.debug("Checking dependencies")
-    rsync_ok = False
-    # Check if rsync is available (usually pre-installed on macOS)
-    try:
-        # Try common paths first, then rely on PATH
-        rsync_paths_to_check = [
-            '/usr/bin/rsync', # Standard macOS location
-            shutil.which('rsync') # Check PATH using shutil.which
-        ]
-        found_path = None
-        for rsync_path in rsync_paths_to_check:
-            if rsync_path and os.path.exists(rsync_path):
-                 try:
-                     # Check if it's executable
-                     if os.access(rsync_path, os.X_OK):
-                         result = subprocess.run([rsync_path, "--version"], capture_output=True, text=True, check=True)
-                         rsync_version = result.stdout.split('\n')[0]
-                         logging.info(f"rsync found: {rsync_version} at {rsync_path}")
-                         found_path = rsync_path
-                         rsync_ok = True
-                         break # Found a working rsync
-                     else:
-                         logging.debug(f"Found rsync at {rsync_path}, but it's not executable.")
-                 except (subprocess.SubprocessError, FileNotFoundError, PermissionError) as check_err:
-                     logging.debug(f"Error checking rsync at {rsync_path}: {check_err}")
-                 except Exception as e:
-                     logging.warning(f"Unexpected error checking rsync at {rsync_path}: {e}")
+    """Check if required external dependencies are available (fswatch if enabled, Syncthing)"""
+    logging.debug("Checking dependencies (Syncthing, fswatch if enabled)...")
 
-        if not rsync_ok:
-             raise FileNotFoundError("rsync executable not found or not functional in standard locations or PATH.")
-
-    except Exception as e:
-        logging.error(f"rsync check failed: {e}")
-        # rsync is usually built-in, so this error is less common but still possible
-        try:
-            import rumps
-            rumps.notification(
-                "TurboSync Error",
-                "rsync Not Found",
-                "rsync is required for TurboSync. It's usually built-in on macOS. Check your system or PATH.",
-                sound=True
-            )
-        except ImportError:
-             logging.error("Could not import rumps to show notification.")
-        logging.error("rsync not found - required for TurboSync to work")
-        return False # rsync is critical
+    # Check for Syncthing (essential)
+    from .syncthing_manager import get_syncthing_executable_path
+    syncthing_path = get_syncthing_executable_path()
+    if not syncthing_path:
+         logging.error("Syncthing executable not found. TurboSync cannot manage Syncthing.")
+         # Show notification?
+         try: # Use try-except for rumps import/use
+             import rumps
+             rumps.notification(
+                 "TurboSync Error",
+                 "Syncthing Not Found",
+                 "Could not find the bundled Syncthing executable. Please rebuild the application.",
+                 sound=True
+             )
+         except Exception as e:
+             logging.error(f"Failed to show Syncthing not found notification: {e}")
+         return False # Critical dependency missing
+    else:
+        logging.info(f"Syncthing executable found at: {syncthing_path}")
 
     # Check if fswatch is available if file watching is enabled
-    fswatch_config = get_fswatch_config() # Assuming get_fswatch_config is defined elsewhere
+    fswatch_config = get_fswatch_config()
     if fswatch_config['watch_enabled']:
         if is_fswatch_available():
-            try:
-                result = subprocess.run(["fswatch", "--version"], capture_output=True, check=True)
-                fswatch_version = result.stdout.decode('utf-8').strip()
-                logging.info(f"fswatch found: {fswatch_version}")
-            except Exception as e:
-                logging.warning(f"Error getting fswatch version: {e}")
+            logging.info("fswatch is available.")
+            # Optional: Log version if needed, but availability check is main point
+            # try:
+            #     result = subprocess.run(["fswatch", "--version"], capture_output=True, check=True, text=True)
+            #     fswatch_version = result.stdout.strip()
+            #     logging.info(f"fswatch version: {fswatch_version}")
+            # except Exception as e:
+            #     logging.warning(f"Could not determine fswatch version: {e}")
         else:
             logging.warning("fswatch not found - file watching will be disabled")
-            import rumps
-            rumps.notification(
-                "TurboSync Warning",
-                "fswatch Not Found",
-                "File watching is enabled but fswatch is not installed. Install with: brew install fswatch",
-                sound=True
-            )
+            try: # Use try-except for rumps import/use
+                import rumps
+                rumps.notification(
+                    "TurboSync Warning",
+                    "fswatch Not Found",
+                    "File watching is enabled but fswatch is not installed. Install with: brew install fswatch",
+                    sound=True
+                )
+            except Exception as e:
+                logging.error(f"Failed to show fswatch not found notification: {e}")
+    else:
+        logging.info("File watching is disabled in configuration, skipping fswatch check.")
     
     return True
 
@@ -266,25 +190,15 @@ def main():
             # Get icon path (setup_icon now just returns the path)
             icon_path = setup_icon() 
             # Note: The actual icon setting is handled within run_app (menubar.py)
-            
-            # Ensure .env file exists
-            env_ok = ensure_env_file()
-            if not env_ok:
-                # If ensure_env_file returned False, it means the file is missing AND
-                # could not be created, or requires user setup. Stop the app.
-                error_msg = "Setup incomplete. Could not create or find required .env configuration file. Please check logs or manually create ~/.Library/Application Support/TurboSync/.env from the template."
-                logging.error(error_msg)
-                try:
-                    # Attempt to show a final alert before exiting
-                    import rumps
-                    rumps.alert(title="TurboSync Startup Error", message=error_msg)
-                except Exception as alert_e:
-                    logging.error(f"Failed to show rumps alert: {alert_e}")
-                    print(f"ERROR: {error_msg}", file=sys.stderr) # Fallback print
+
+            # Ensure the configuration directory exists
+            config_dir_ok = ensure_config_dir()
+            if not config_dir_ok:
+                # If the config directory cannot be created/accessed, we cannot proceed.
+                # ensure_config_dir already logs and shows an alert.
                 sys.exit(1) # Exit the application
 
-            # --- Configuration Loading is now handled solely by menubar.py ---
-            # Remove the redundant load_dotenv call here.
+            # --- Configuration Loading and validation is now handled solely by menubar.py ---
             # logging.debug(f"Skipping load_dotenv in main.py as menubar.py handles it.")
 
             # Check dependencies

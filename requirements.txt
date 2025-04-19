@@ -2,5 +2,7 @@ python-dotenv==1.0.0
 rumps==0.4.0
 schedule==1.2.0
 pyinstaller==6.12
-fswatch
+# fswatch is a system binary, not a pip package
 PySide6>=6.0.0
+requests>=2.20.0 # Needed for Syncthing API client
+Pillow>=9.0.0 # For icon creation in build script
