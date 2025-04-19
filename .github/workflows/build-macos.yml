@@ -48,9 +48,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-brew-
 
-      - name: Install build tools (fswatch, create-dmg)
+      - name: Install build tools (fswatch, syncthing, create-dmg) # Updated name
         run: |
           brew install fswatch
+          brew install syncthing # Added syncthing install
           brew install create-dmg
 
       - name: Run build script
