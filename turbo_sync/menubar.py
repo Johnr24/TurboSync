@@ -187,7 +187,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         schedule.every(self.config['sync_interval']).minutes.do(self.scheduled_config_update)
         self._start_scheduler_thread() # Start scheduler thread if not running
 
-        # Set up file watcher if enabled
+        # Set up file watcher if enabled (with 5 minute cooldown)
         self.setup_file_watcher() # This handles enabling/disabling based on config
 
         # Start Syncthing Daemons (plural) - This will also initialize clients if successful
@@ -437,10 +437,12 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         if self.watch_enabled and is_fswatch_available() and local_dir_to_watch:
             try:
                 logging.info(f"Starting file watcher for: {local_dir_to_watch}")
+                # Create file watcher with cooldown period
                 self.file_watcher = FileWatcher(
                     local_dir_to_watch,
                     self.on_files_changed,
-                    watch_delay
+                    watch_delay,
+                    cooldown_minutes=5  # 5 minute cooldown for stability
                 )
                 if self.file_watcher.start():
                     logging.info("File watcher started successfully.")
@@ -482,14 +484,14 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
     def on_files_changed(self):
         """Callback for when files change (likely triggers config update)"""
-        logging.debug("File changes detected by fswatch")
+        logging.debug("File changes detected by fswatch - cooldown period completed")
         # Trigger a Syncthing configuration update check, as a .livework file
         # might have been added or removed.
-        logging.info("File changes detected, triggering Syncthing configuration update check.")
+        logging.info("File changes detected and stability period completed, triggering Syncthing configuration update.")
         rumps.notification(
             "TurboSync",
-            "File Changes Detected",
-            "Checking Syncthing configuration...",
+            "File Changes Stabilized",
+            "Checking Syncthing configuration after cooldown period...",
             sound=False
         )
         self.update_syncthing_config_task(None) # Trigger the config update task

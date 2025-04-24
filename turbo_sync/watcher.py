@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 # logger = logging.getLogger('TurboSync')
 
 class FileWatcher:
-    def __init__(self, local_dir, callback, delay_seconds=2):
+    def __init__(self, local_dir, callback, delay_seconds=2, cooldown_minutes=5):
         """
         Initialize a file watcher for the specified directory
         
@@ -20,15 +20,19 @@ class FileWatcher:
             local_dir: Directory to watch
             callback: Function to call when changes are detected
             delay_seconds: Debounce delay to avoid multiple callbacks
+            cooldown_minutes: Cooldown period before triggering sync
         """
-        logging.info(f"Initializing FileWatcher for {local_dir} with {delay_seconds}s delay")
+        logging.info(f"Initializing FileWatcher for {local_dir} with {delay_seconds}s delay and {cooldown_minutes}m cooldown")
         self.local_dir = os.path.expanduser(local_dir)
         self.callback = callback
         self.delay_seconds = delay_seconds
+        self.cooldown_minutes = cooldown_minutes
         # self.monitor = None # Removed - Using subprocess directly
         self.watcher_thread = None
         self.running = False
         self.last_event_time = 0
+        self.last_change_time = 0
+        self.cooldown_timer = None
         self._lock = threading.Lock()
         self.event_count = 0
         
@@ -54,7 +58,7 @@ class FileWatcher:
             logging.error(f"Error listing initial directory contents: {e}")
     
     def _handle_event(self, path):
-        """Handle a file system event with debouncing"""
+        """Handle a file system event with debouncing and cooldown"""
         current_time = time.time()
         self.event_count += 1
         
@@ -85,15 +89,26 @@ class FileWatcher:
                  # Catch other potential errors during detail retrieval
                  logging.error(f"Error getting event details for {path}: {e}")
 
+            # Update the last change time for cooldown tracking
+            self.last_change_time = current_time
+            
+            # Cancel any pending cooldown timer
+            if self.cooldown_timer:
+                self.cooldown_timer.cancel()
+                logging.debug(f"Cancelled pending cooldown timer due to new change")
+            
             # Debounce - only trigger if it's been longer than delay_seconds since the last event
             if current_time - self.last_event_time > self.delay_seconds:
                 logging.info(f"Change detected in {path}")
                 self.last_event_time = current_time
                 
-                # Wait a bit for all changes to settle and then call the callback
-                # This prevents multiple rapid syncs
-                logging.debug(f"Scheduling callback with {self.delay_seconds}s delay")
-                threading.Timer(self.delay_seconds, self.callback).start()
+                # Schedule new cooldown timer instead of immediate callback
+                logging.debug(f"Scheduling cooldown timer for {self.cooldown_minutes} minutes")
+                self.cooldown_timer = threading.Timer(
+                    self.cooldown_minutes * 60, 
+                    self._trigger_sync_after_cooldown
+                )
+                self.cooldown_timer.start()
             else:
                 logging.debug(f"Debounced change event for {path}")
     
@@ -193,6 +208,24 @@ class FileWatcher:
     #         logging.error(f"File watcher error: {str(e)}", exc_info=True)
     #         self.running = False
 
+    def _trigger_sync_after_cooldown(self):
+        """Only trigger sync if no changes during cooldown period"""
+        with self._lock:
+            current_time = time.time()
+            time_since_last_change = current_time - self.last_change_time
+            
+            if time_since_last_change >= self.cooldown_minutes * 60:
+                logging.info(f"Cooldown period of {self.cooldown_minutes} minutes completed with no new changes")
+                logging.info(f"Triggering sync callback after stability period")
+                self.callback()
+            else:
+                logging.debug(f"Skipping cooldown callback - changes occurred during cooldown period")
+                # Reschedule for remaining time
+                remaining_time = (self.cooldown_minutes * 60) - time_since_last_change
+                logging.debug(f"Rescheduling cooldown timer for remaining {remaining_time:.1f} seconds")
+                self.cooldown_timer = threading.Timer(remaining_time, self._trigger_sync_after_cooldown)
+                self.cooldown_timer.start()
+
     def stop(self):
         """Stop watching for file changes"""
         if not self.running:
@@ -202,6 +235,13 @@ class FileWatcher:
         try:
             logging.info("Stopping file watcher")
             self.running = False
+
+            # Clean up cooldown timer
+            with self._lock:
+                if self.cooldown_timer:
+                    logging.debug("Cancelling cooldown timer")
+                    self.cooldown_timer.cancel()
+                    self.cooldown_timer = None
 
             # Removed monitor reference
             # if self.monitor:

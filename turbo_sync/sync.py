@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import multiprocessing
 import time
 from concurrent.futures import ProcessPoolExecutor
+import stat # For file permission checks
 
 # Fix multiprocessing to avoid import warnings
 if __name__ == "__main__":
@@ -174,6 +175,65 @@ def find_livework_dirs(config):
 # Removed sync_directory (rsync specific)
 # Removed perform_sync (rsync specific)
 
+# --- Helper functions for conservative syncing ---
+def should_sync_file(filepath):
+    """
+    Check if a file is stable enough to sync.
+    
+    Args:
+        filepath: Path to the file to check
+        
+    Returns:
+        bool: True if the file is stable and ready to sync, False otherwise
+    """
+    try:
+        if not os.path.exists(filepath):
+            logger.debug(f"File doesn't exist, not syncing: {filepath}")
+            return False
+            
+        # Get file stats
+        stat_info = os.stat(filepath)
+        current_time = time.time()
+        file_age = current_time - stat_info.st_mtime
+        file_size = stat_info.st_size
+        
+        # Don't sync files modified in last 5 minutes
+        if file_age < 300:  # 5 minutes in seconds
+            logger.debug(f"File too recent ({file_age:.1f}s old), waiting for stability: {filepath}")
+            return False
+            
+        # For larger files (>10MB), require longer stability period
+        if file_size > 10*1024*1024 and file_age < 600:  # 10 minutes for large files
+            logger.debug(f"Large file ({file_size/1024/1024:.1f}MB) needs longer stability period: {filepath}")
+            return False
+            
+        # Check if file is locked or being written to
+        try:
+            # Try to open the file in read-write mode to check if it's locked
+            with open(filepath, 'r+b') as f:
+                # Try to get an exclusive lock (non-blocking)
+                import fcntl
+                try:
+                    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    # If we get here, the file isn't locked
+                    fcntl.flock(f, fcntl.LOCK_UN)
+                except IOError:
+                    logger.debug(f"File appears to be locked by another process: {filepath}")
+                    return False
+        except (IOError, PermissionError):
+            logger.debug(f"Cannot open file for lock check, may be in use: {filepath}")
+            return False
+        except Exception as e:
+            # On platforms where flock isn't available or other errors
+            logger.debug(f"Lock check failed (non-critical): {e}")
+            # Continue with other checks
+            
+        logger.debug(f"File appears stable and ready for sync: {filepath}")
+        return True
+    except Exception as e:
+        logger.error(f"Error checking file stability for {filepath}: {e}")
+        return False
+
 # --- New Syncthing Configuration Update Logic ---
 from .syncthing_manager import SyncthingApiClient # Keep API client import
 # Define APP_NAME here if not already defined globally in this file
@@ -184,12 +244,14 @@ def update_syncthing_configuration(api_client_source: SyncthingApiClient, api_cl
     Finds .livework directories, compares with current Syncthing config,
     and updates BOTH local Syncthing daemon configurations via API to sync
     the corresponding folders between them.
+    
+    Applies conservative sync settings to reduce conflicts and improve stability.
 
     Args:
         api_client_source: Initialized SyncthingApiClient for the source instance.
         api_client_dest: Initialized SyncthingApiClient for the destination instance.
     """
-    logger.info("Starting Syncthing configuration update process...")
+    logger.info("Starting Syncthing configuration update process with conservative sync settings...")
     config_updated = False
     error_occurred = False
     message = "Configuration update check completed."
@@ -300,6 +362,25 @@ def update_syncthing_configuration(api_client_source: SyncthingApiClient, api_cl
         else:
             raise ConnectionError("Could not determine Destination Syncthing Device ID from API.")
 
+        # Apply conservative sync settings to both configs
+        logger.info("Applying conservative sync settings to both Syncthing instances")
+        
+        # Global options for both instances
+        for config in [new_config_source, new_config_dest]:
+            if 'options' not in config:
+                config['options'] = {}
+                
+            # Update with conservative settings
+            config['options'].update({
+                'maxConcurrentTransfers': 2,  # Limit concurrent transfers
+                'maxFolderConcurrency': 1,    # Process one folder at a time
+                'urAccepted': -1,             # Disable usage reporting
+                'relaysEnabled': False,       # Disable relays for direct connection
+                'reconnectionIntervalS': 60,  # More time between reconnection attempts
+                'progressUpdateIntervalS': 300, # Less frequent progress updates (5 min)
+            })
+            config_updated = True
+        
         # 6. Compare and Update Folders
         # --- Update Source Instance Folders ---
         current_folder_ids_source = {f.get('id') for f in new_config_source['folders']}
@@ -319,12 +400,35 @@ def update_syncthing_configuration(api_client_source: SyncthingApiClient, api_cl
         for folder_id in folders_to_add_source:
             source_path = desired_folders[folder_id]['source_path']
             logger.info(f"Adding folder '{folder_id}' ({source_path}) to Source Syncthing config.")
-            SyncthingApiClient.add_folder_to_config(
-                new_config_source,
-                folder_id,
-                source_path, # Use source path for source instance
-                devices=[device_id_dest] # Share with Destination instance
-            )
+            # Add folder with conservative settings
+            folder_config = {
+                "id": folder_id,
+                "label": os.path.basename(source_path) or folder_id,
+                "path": source_path,
+                "type": "sendreceive",
+                "devices": [{'deviceID': device_id_dest}],
+                # Conservative sync settings
+                "rescanIntervalS": 3600,      # 1 hour between rescans
+                "fsWatcherEnabled": True,     # Enable watcher
+                "fsWatcherDelayS": 10,        # 10 second delay for watcher
+                "pullerMaxPendingKiB": 51200, # 50MB pending limit
+                "pullerPauseS": 60,           # 1 minute pause between pulls
+                "maxConflicts": 10,           # Limit stored conflicts
+                "copyOwnershipFromParent": True, # Preserve ownership
+                "ignorePerms": False,         # Respect permissions
+                "scanProgressIntervalS": 300, # 5 minute scan progress interval
+                "pullOrder": "random",        # Random pull order to avoid hotspots
+                "weakHashThresholdPct": 25,   # More accurate but slower weak hash
+                "markerName": ".stfolder",    # Standard marker
+                "syncOwnership": True,        # Sync ownership when possible
+                "sendOwnership": True,        # Send ownership info
+            }
+            
+            # Add to config
+            if 'folders' not in new_config_source:
+                new_config_source['folders'] = []
+            new_config_source['folders'].append(folder_config)
+            logger.info(f"Added folder '{folder_id}' with conservative settings to Source config")
             config_updated = True
 
         # Update existing folders (Source)
@@ -368,12 +472,35 @@ def update_syncthing_configuration(api_client_source: SyncthingApiClient, api_cl
         for folder_id in folders_to_add_dest:
             dest_path = desired_folders[folder_id]['dest_path']
             logger.info(f"Adding folder '{folder_id}' ({dest_path}) to Dest Syncthing config.")
-            SyncthingApiClient.add_folder_to_config(
-                new_config_dest,
-                folder_id,
-                dest_path, # Use destination path for destination instance
-                devices=[device_id_source] # Share with Source instance
-            )
+            # Add folder with conservative settings
+            folder_config = {
+                "id": folder_id,
+                "label": os.path.basename(dest_path) or folder_id,
+                "path": dest_path,
+                "type": "sendreceive",
+                "devices": [{'deviceID': device_id_source}],
+                # Conservative sync settings
+                "rescanIntervalS": 3600,      # 1 hour between rescans
+                "fsWatcherEnabled": True,     # Enable watcher
+                "fsWatcherDelayS": 10,        # 10 second delay for watcher
+                "pullerMaxPendingKiB": 51200, # 50MB pending limit
+                "pullerPauseS": 60,           # 1 minute pause between pulls
+                "maxConflicts": 10,           # Limit stored conflicts
+                "copyOwnershipFromParent": True, # Preserve ownership
+                "ignorePerms": False,         # Respect permissions
+                "scanProgressIntervalS": 300, # 5 minute scan progress interval
+                "pullOrder": "random",        # Random pull order to avoid hotspots
+                "weakHashThresholdPct": 25,   # More accurate but slower weak hash
+                "markerName": ".stfolder",    # Standard marker
+                "syncOwnership": True,        # Sync ownership when possible
+                "sendOwnership": True,        # Send ownership info
+            }
+            
+            # Add to config
+            if 'folders' not in new_config_dest:
+                new_config_dest['folders'] = []
+            new_config_dest['folders'].append(folder_config)
+            logger.info(f"Added folder '{folder_id}' with conservative settings to Dest config")
             config_updated = True
 
         # Update existing folders (Dest)
