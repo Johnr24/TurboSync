@@ -4,6 +4,7 @@ import subprocess
 import logging
 import time
 import platform
+import socket
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,15 @@ SYNCTHING_CONFIG_DIR_DEST = os.path.join(USER_CONFIG_DIR, 'syncthing_config_dest
 SYNCTHING_LOG_FILE_SOURCE = os.path.join(USER_LOG_DIR, 'syncthing_source.log')
 SYNCTHING_LOG_FILE_DEST = os.path.join(USER_LOG_DIR, 'syncthing_dest.log')
 
+
+def verify_syncthing_port(address):
+    """Verify if Syncthing is listening on the specified address"""
+    try:
+        host, port = address.split(':')
+        with socket.create_connection((host, int(port)), timeout=2):
+            return True
+    except (ValueError, socket.timeout, ConnectionRefusedError):
+        return False
 
 def get_syncthing_executable_path():
     """Finds the bundled Syncthing binary path."""
@@ -148,6 +158,11 @@ def start_syncthing_daemon(instance_id, config_dir, api_address, gui_address, lo
         gui_address (str): GUI listen address (e.g., "127.0.0.1:28385").
         log_file (str): Path to the log file for this instance.
     """
+    # First check if port is already in use
+    if verify_syncthing_port(gui_address):
+        logger.info(f"Syncthing {instance_id} already running at {gui_address}")
+        return 'already_running', None
+        
     syncthing_exe = get_syncthing_executable_path()
     if not syncthing_exe:
         return None, "Syncthing executable not found."
