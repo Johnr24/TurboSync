@@ -6,6 +6,7 @@ import shutil # Import shutil module
 from dotenv import load_dotenv
 import multiprocessing
 import time
+import sys # For platform check
 from concurrent.futures import ProcessPoolExecutor
 import stat # For file permission checks
 
@@ -207,7 +208,65 @@ def should_sync_file(filepath):
             logger.debug(f"Large file ({file_size/1024/1024:.1f}MB) needs longer stability period: {filepath}")
             return False
             
-        # Check if file is locked or being written to
+        # Enhanced file activity detection
+        if is_file_really_busy(filepath):
+            logger.debug(f"File appears to be in use by an application: {filepath}")
+            return False
+            
+        logger.debug(f"File appears stable and ready for sync: {filepath}")
+        return True
+    except Exception as e:
+        logger.error(f"Error checking file stability for {filepath}: {e}")
+        return False
+
+def is_file_really_busy(filepath):
+    """
+    Combines multiple checks to determine if a file is truly in use.
+    Uses lsof, fuser, and macOS-specific checks with process whitelisting.
+    
+    Returns:
+        bool: True if file is busy/in use, False if it's safe to sync
+    """
+    try:
+        # 1. First check basic stability (mod time, size)
+        stat_info = os.stat(filepath)
+        file_age = time.time() - stat_info.st_mtime
+        
+        if file_age < 5:  # Skip expensive checks for very recent files
+            return True
+            
+        # 2. lsof check (best for active writes)
+        try:
+            lsof = subprocess.run(['lsof', '-F', 'n', filepath],
+                                capture_output=True,
+                                text=True,
+                                timeout=0.1)  # Fast timeout
+            if lsof.returncode == 0 and lsof.stdout:
+                # Parse PID and process names
+                procs = {line[1:] for line in lsof.stdout.split('\n')
+                        if line.startswith('n')}
+                
+                # Ignore known safe processes
+                safe_procs = {'Finder', 'quicklookd', 'mds', 'mdworker', 'Spotlight'}
+                if procs and not procs - safe_procs:  # Only contains safe processes
+                    logger.debug(f"File open only by safe processes {procs}: {filepath}")
+                    return False
+                
+                # Check for known creative apps
+                creative_apps = {'DaVinci Resolve', 'Final Cut Pro', 'Adobe Premiere', 
+                                'Photoshop', 'Lightroom', 'After Effects'}
+                for app in creative_apps:
+                    if any(app in proc for proc in procs):
+                        logger.debug(f"File in use by creative app {app}: {filepath}")
+                        return True
+                
+                if procs:
+                    logger.debug(f"File in use by processes: {procs}")
+                    return True
+        except Exception as e:
+            logger.debug(f"lsof check failed (non-critical): {e}")
+            
+        # 3. Try file lock check
         try:
             # Try to open the file in read-write mode to check if it's locked
             with open(filepath, 'r+b') as f:
@@ -219,20 +278,35 @@ def should_sync_file(filepath):
                     fcntl.flock(f, fcntl.LOCK_UN)
                 except IOError:
                     logger.debug(f"File appears to be locked by another process: {filepath}")
-                    return False
+                    return True
         except (IOError, PermissionError):
             logger.debug(f"Cannot open file for lock check, may be in use: {filepath}")
-            return False
+            return True
         except Exception as e:
             # On platforms where flock isn't available or other errors
             logger.debug(f"Lock check failed (non-critical): {e}")
-            # Continue with other checks
             
-        logger.debug(f"File appears stable and ready for sync: {filepath}")
-        return True
-    except Exception as e:
-        logger.error(f"Error checking file stability for {filepath}: {e}")
+        # 4. macOS-specific attribute check
+        if sys.platform == 'darwin':
+            try:
+                # Check if file has com.apple.FinderInfo extended attributes
+                xattr = subprocess.run(['xattr', '-l', filepath],
+                                     capture_output=True,
+                                     text=True,
+                                     timeout=0.1)
+                if 'com.apple.FinderInfo' in xattr.stdout and 'com.apple.lastuseddate' in xattr.stdout:
+                    # File is being actively managed by Finder - check how recently
+                    if file_age < 60:  # If modified in last minute and has these attrs
+                        logger.debug(f"File has active Finder attributes: {filepath}")
+                        return True
+            except Exception as e:
+                logger.debug(f"xattr check failed (non-critical): {e}")
+                
         return False
+        
+    except Exception as e:
+        logger.debug(f"Error in is_file_really_busy: {e}")
+        return True  # Default to "busy" on any error
 
 # --- New Syncthing Configuration Update Logic ---
 from .syncthing_manager import SyncthingApiClient # Keep API client import
