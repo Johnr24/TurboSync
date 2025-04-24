@@ -34,7 +34,7 @@ from PySide6.QtCore import QObject, Signal # Add QObject, Signal
 # --- Import Syncthing Manager ---
 from turbo_sync.syncthing_manager import (
     start_syncthing_daemon, stop_syncthing_daemon, is_syncthing_running,
-    SyncthingApiClient, get_api_key_from_config, generate_syncthing_config, # <-- Add here
+    SyncthingApiClient, get_api_key_from_config, generate_syncthing_config, verify_syncthing_port, # <-- Added verify_syncthing_port
     SYNCTHING_CONFIG_DIR_SOURCE, SYNCTHING_CONFIG_DIR_DEST, # Use specific dirs
     SYNCTHING_LOG_FILE_SOURCE, SYNCTHING_LOG_FILE_DEST, # Use specific logs
     USER_LOG_DIR) # Added imports # Corrected imports
