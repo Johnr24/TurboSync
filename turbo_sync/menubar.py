@@ -18,7 +18,7 @@ from collections import OrderedDict # To maintain setting order
 # from PySide6.QtWidgets import QApplication, QDialog, ...
 # from PySide6.QtCore import Qt, Slot
 
-from turbo_sync.sync import perform_sync, load_config, find_livework_dirs # Absolute import, added find_livework_dirs
+from turbo_sync.sync import perform_sync, load_config, find_livework_dirs # Absolute import
 from turbo_sync.watcher import FileWatcher, is_fswatch_available, get_fswatch_config # Absolute import
 # import multiprocessing # Import multiprocessing for Queue and Manager # Removed
 import textwrap # For formatting long messages
@@ -92,7 +92,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         self.sync_emitter = SyncSignalEmitter() # Add emitter
 
         # --- Define Items Needing State Management First ---
-        self.status_item = rumps.MenuItem(f"Status: {self.last_sync_status}")
+        self.status_item = rumps.MenuItem(f"Status: {self.last_sync_status} (Local → Remote)")
         self.watch_toggle = rumps.MenuItem("Enable File Watching") # Title matches decorator
         # Synced projects submenu removed
 
@@ -101,7 +101,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         # Construct the list with MenuItem objects included directly
         menu_items = [
             self.status_item,       # Insert the MenuItem object
-            "Sync Now",
+            "Push Now",
             # Removed self.status_panel_item from list
            "View Logs",
            # Synced projects submenu removed
@@ -229,7 +229,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
             rumps.notification( # Reverted to rumps.notification
                 "TurboSync",
                 "File Changes Detected",
-                "Starting sync due to local file changes",
+                "Starting push due to local file changes",
                 sound=False
             )
             self.sync_now(None)
@@ -298,22 +298,22 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         # self.perform_sync_task() # Don't call automatically here, wait for click
 
     # --- New perform_sync_task method (replaces old one and _check_sync_progress/_update_status_after_sync) ---
-    @rumps.clicked("Sync Now") # Add decorator
+    @rumps.clicked("Push Now") # Add decorator
     def perform_sync_task(self, sender=None): # Add sender argument
-        """Handles the execution of the sync process in a separate thread. Triggered by 'Sync Now' click or scheduled sync."""
+        """Handles the execution of the push process in a separate thread. Triggered by 'Push Now' click or scheduled sync."""
         # Log sender if needed: logging.debug(f"perform_sync_task triggered by: {sender}")
         if self.is_syncing:
             logging.warning("Sync task requested, but sync is already in progress.")
-            rumps.notification("Sync In Progress", "", "A synchronization task is already running.")
+            rumps.notification("Push In Progress", "", "A push operation is already running.")
             # Ensure panel is visible if sync is ongoing and panel exists
             if self.status_panel and not self.status_panel.isVisible():
                 self.show_status_panel()
             return
 
-        logger.info("Starting sync task...")
+        logger.info("Starting push task...")
         self.is_syncing = True
         # Update UI to indicate syncing (e.g., disable button, change icon/status)
-        self.status_item.title = "Status: Syncing..."
+        self.status_item.title = "Status: Pushing to remote..."
         # Consider disabling the "Sync Now" menu item temporarily if needed
         # self.menu["Sync Now"].set_callback(None) # Example: Disable callback
 
@@ -322,10 +322,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
         # Define the target function for the background thread
         def sync_thread_target():
-            logger.info("Sync thread started.")
+            logger.info("Push thread started.")
             final_results = None
             overall_success = False
-            sync_message = "Sync finished."
+            sync_message = "Push finished."
             try:
                 # Start the timer to check the progress queue
                 self._start_progress_timer()
@@ -339,17 +339,17 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                     total_dirs = len(final_results)
                     overall_success = total_dirs == 0 or successful_syncs == total_dirs
                     if total_dirs == 0:
-                        sync_message = "No projects found to sync."
+                        sync_message = "No projects found to push."
                     elif overall_success:
-                        sync_message = f"Synced {successful_syncs}/{total_dirs} projects successfully."
+                        sync_message = f"Pushed {successful_syncs}/{total_dirs} projects successfully."
                     else:
-                        sync_message = f"Sync completed with {total_dirs - successful_syncs} failures out of {total_dirs} projects."
+                        sync_message = f"Push completed with {total_dirs - successful_syncs} failures out of {total_dirs} projects."
 
-                    logger.info(f"Sync task completed in thread. {sync_message}")
+                    logger.info(f"Push task completed in thread. {sync_message}")
                     # Show notification (safe from thread)
                     rumps.notification(
                         "TurboSync",
-                        "Sync Complete" if overall_success else "Sync Finished with Errors",
+                        "Push Complete" if overall_success else "Push Finished with Errors",
                         sync_message,
                         sound=not overall_success # Sound on failure
                     )
@@ -360,10 +360,10 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                     # })
                 else:
                     # perform_sync returned None (config error or major exception)
-                    logger.error("Sync task failed with configuration or unexpected error.")
+                    logger.error("Push task failed with configuration or unexpected error.")
                     overall_success = False
                     sync_message = "Sync failed due to error. Check logs."
-                    rumps.notification("TurboSync Sync Failed", sync_message, "", sound=True)
+                    rumps.notification("TurboSync Push Failed", sync_message, "", sound=True)
                     # Optionally emit final failure signal
                     # self.sync_emitter.sync_progress_update.emit({
                     #     'type': 'overall_end', 'success': False, 'message': sync_message
@@ -374,7 +374,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 logger.exception("Traceback:")
                 overall_success = False
                 sync_message = f"Error during sync: {e}"
-                rumps.notification("TurboSync Sync Error", sync_message, "", sound=True)
+                rumps.notification("TurboSync Push Error", sync_message, "", sound=True)
                 # Optionally emit final failure signal
                 # self.sync_emitter.sync_progress_update.emit({
                 #     'type': 'overall_end', 'success': False, 'message': sync_message
@@ -406,7 +406,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
         logger.info("Finalizing sync UI on main thread.")
         self.is_syncing = False
         self.last_sync_status = f"Last sync: {time.strftime('%H:%M:%S')} - {'Success' if overall_success else 'Failed'}"
-        self.status_item.title = f"Status: {self.last_sync_status}"
+        self.status_item.title = f"Status: {self.last_sync_status} (Local → Remote)"
         self.last_sync_results = final_results # Store results if needed
 
         # Re-enable the "Sync Now" menu item if it was disabled
@@ -461,14 +461,14 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
 
     # --- Update scheduled_sync ---
     def scheduled_sync(self):
-        """Run the scheduled sync if not already syncing"""
-        logging.debug("Scheduled sync triggered")
+        """Run the scheduled push if not already syncing"""
+        logging.debug("Scheduled push triggered")
         if not self.is_syncing: # Use the correct flag
-            logging.info("Starting scheduled sync")
+            logging.info("Starting scheduled push")
             # No need to create thread here, call the task handler
             self.perform_sync_task()
         else:
-            logging.debug("Skipping scheduled sync (sync already in progress)")
+            logging.debug("Skipping scheduled push (push already in progress)")
 
     @rumps.clicked("View Logs") # Keep decorator
     def view_logs(self, _):

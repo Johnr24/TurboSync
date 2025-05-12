@@ -135,85 +135,41 @@ def test_remote_connection(config):
         return False
 
 def find_livework_dirs(config):
-    """Find directories with .livework files on the remote server or mounted volume"""
-    logger.info("Scanning for .livework files")
+    """Find directories with .livework files in the local directory"""
+    logger.info("Scanning for .livework files in local directory")
     
     livework_dirs = []
+    local_dir = config['local_dir']
     
-    # If the volume is mounted locally, search directly on the filesystem
-    if config.get('is_mounted', False):
-        mounted_path = config['mounted_path']
-        logger.info(f"Searching for .livework files in mounted volume: {mounted_path}")
-        
+    if not os.path.exists(local_dir):
+        logger.error(f"Local directory does not exist: {local_dir}")
+        return []
+    
+    try:
+        # Log the top-level directory contents for debugging
+        logger.debug(f"Contents of local directory: {local_dir}")
         try:
-            # Log the top-level directory contents for debugging
-            logger.debug(f"Contents of mounted directory: {mounted_path}")
-            try:
-                entries = os.listdir(mounted_path)
-                for entry in entries:
-                    logger.debug(f"  - {entry}")
-            except Exception as e:
-                logger.error(f"Error listing mounted directory contents: {e}")
-            
-            # Walk the directory tree to find .livework files
-            logger.info("Beginning directory walk to find .livework files...")
-            for root, dirs, files in os.walk(mounted_path):
-                logger.debug(f"Checking directory: {root}")
-                # Check for both '.livework' (hidden) and 'livework' (visible) files
-                if '.livework' in files or 'livework' in files:
-                    livework_dirs.append(root)
-                    logger.info(f"Found .livework in: {root}")
-            
-            logger.info(f"Found {len(livework_dirs)} directories with .livework files")
-            return livework_dirs
-            
+            entries = os.listdir(local_dir)
+            for entry in entries:
+                logger.debug(f"  - {entry}")
         except Exception as e:
-            logger.error(f"Error finding .livework directories in mounted volume: {str(e)}")
-            return []
-    
-    # Otherwise, use SSH to find the directories
-    else:
-        logger.info("Scanning for .livework files on remote server")
+            logger.error(f"Error listing local directory contents: {e}")
         
-        # Use a more robust command that properly handles paths with spaces and special characters
-        # The command first changes to the remote directory, then finds .livework files
-        # relative to that location to avoid path issues
-        # Use single quotes around the path for better shell escaping
-        remote_dir = config['remote_dir'].replace('"', '\\"')
+        # Walk the directory tree to find .livework files
+        logger.info("Beginning directory walk to find .livework files...")
+        for root, dirs, files in os.walk(local_dir):
+            logger.debug(f"Checking directory: {root}")
+            # Check for both '.livework' (hidden) and 'livework' (visible) files
+            if '.livework' in files or 'livework' in files:
+                livework_dirs.append(root)
+                logger.info(f"Found .livework in: {root}")
         
-        cmd = [
-            'ssh',
-            f"{config['remote_user']}@{config['remote_host']}",
-            '-p', config['remote_port'],
-            f"cd '{remote_dir}' && find . -name '.livework' -type f | xargs -I{{}} dirname {{}}"
-        ]
+        logger.info(f"Found {len(livework_dirs)} directories with .livework files")
+        return livework_dirs
         
-        logger.debug(f"Find command: {' '.join(cmd)}")
-        
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            
-            # Process relative paths (they'll start with ./)
-            for line in result.stdout.splitlines():
-                if line.strip():
-                    # Convert relative path to absolute
-                    rel_path = line.strip()
-                    abs_path = os.path.normpath(os.path.join(config['remote_dir'], rel_path))
-                    livework_dirs.append(abs_path)
-                    logger.info(f"Found .livework in: {abs_path}")
-                    
-            logger.info(f"Found {len(livework_dirs)} directories with .livework files")
-            return livework_dirs
-        
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error finding .livework directories: {str(e)}")
-            logger.error(f"Error output: {e.stderr}")
-            return []
+    except Exception as e:
+        logger.error(f"Error finding .livework directories in local directory: {str(e)}")
+        return []
 
 def list_remote_directory(config):
     """List contents of remote directory or mounted volume"""
@@ -258,44 +214,34 @@ def list_remote_directory(config):
             logger.error(f"Error listing remote directory: {e.stderr}")
             return False
 
-def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None):
+def sync_directory(local_dir_info, remote_base_dir, config, progress_queue=None):
     """
-    Sync a specific remote directory to a local directory using rsync.
+    Sync a specific local directory to a remote directory using rsync.
 
     Args:
-        remote_dir_info (tuple): A tuple containing (index, remote_path).
-        local_base_dir (str): The base local directory to sync into.
+        local_dir_info (tuple): A tuple containing (index, local_path).
+        remote_base_dir (str): The base remote directory to sync into.
         config (dict): The loaded configuration dictionary.
         progress_queue (multiprocessing.Queue, optional): Queue to send progress updates.
 
     Returns:
-        tuple: (remote_path, result_data) where result_data contains success status and details.
+        tuple: (local_path, result_data) where result_data contains success status and details.
     """
-    index, remote_path = remote_dir_info
-    project_name = os.path.basename(remote_path) # Get project name for reporting
+    index, local_path = local_dir_info
+    project_name = os.path.basename(local_path) # Get project name for reporting
     rsync_executable = shutil.which('rsync') or 'rsync' # Find rsync or default
 
-    # Calculate the relative path from the base remote directory or mounted path
-    if config['is_mounted']:
-        base_path = config['mounted_path']
-    else:
-        base_path = config['remote_dir'] # Use the configured remote base for SSH
+    # Calculate the relative path from the base local directory
+    base_path = config['local_dir']
 
-    if remote_path == base_path:
+    if local_path == base_path:
         rel_path = '.'
     else:
         try:
-            # Use relpath carefully, ensuring both paths are absolute or relative consistently
-            # For SSH, remote_path is absolute, base_path might need adjustment if not absolute
-            # For mounted, both should be absolute paths
-            rel_path = os.path.relpath(remote_path, base_path)
+            # Use relpath to get the relative path from local base directory
+            rel_path = os.path.relpath(local_path, base_path)
         except ValueError:
-            rel_path = os.path.basename(remote_path) # Fallback
-
-    local_path = os.path.join(local_base_dir, rel_path)
-
-    # Ensure the local target directory exists
-    os.makedirs(local_path, exist_ok=True)
+            rel_path = os.path.basename(local_path) # Fallback
 
     # Construct rsync command
     rsync_opts_str = config['rsync_options']
@@ -315,14 +261,18 @@ def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None)
 
     # Define source and destination
     # Ensure trailing slashes for directory content sync
-    dest = local_path.rstrip('/') + '/'
+    source = local_path.rstrip('/') + '/'
 
     if config['is_mounted']:
-        source = remote_path.rstrip('/') + '/'
+        # For mounted volumes, construct the destination path
+        remote_path = os.path.join(config['mounted_path'], rel_path)
+        dest = remote_path.rstrip('/') + '/'
         logger.info(f"Performing rsync (mounted): {source} -> {dest}")
     else: # SSH mode
+        # Construct the remote path
+        remote_path = os.path.join(config['remote_dir'], rel_path)
+        
         # Escape spaces and special characters for SSH path
-        # Using shlex.quote is safer if available
         try:
             import shlex
             escaped_remote_path = shlex.quote(remote_path.rstrip('/'))
@@ -330,19 +280,19 @@ def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None)
             # Basic escaping for spaces if shlex not available
             escaped_remote_path = remote_path.replace(' ', '\\ ')
 
-        source = f"{config['remote_user']}@{config['remote_host']}:{escaped_remote_path}/"
+        dest = f"{config['remote_user']}@{config['remote_host']}:{escaped_remote_path}/"
         # Add SSH options (port)
         rsync_cmd.extend(['-e', f"ssh -p {config['remote_port']}"])
         logger.info(f"Performing rsync (SSH): {source} -> {dest}")
 
     rsync_cmd.extend([source, dest])
 
-    logger.debug(f"Rsync command for '{remote_path}': {' '.join(rsync_cmd)}")
+    logger.debug(f"Rsync command for '{local_path}': {' '.join(rsync_cmd)}")
 
     # --- Report Start ---
     if progress_queue:
         try:
-            progress_queue.put({'type': 'start', 'project': project_name, 'path': remote_path})
+            progress_queue.put({'type': 'start', 'project': project_name, 'path': local_path})
         except Exception as q_err:
             logger.error(f"Failed to put start message on queue for {project_name}: {q_err}")
     # --- End Report Start ---
@@ -467,7 +417,7 @@ def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None)
         if progress_queue:
             try:
                 # Put end message on queue
-                progress_queue.put({'type': 'end', 'project': project_name, 'path': remote_path, 'success': success, 'error': error_message if not success else None})
+                progress_queue.put({'type': 'end', 'project': project_name, 'path': local_path, 'success': success, 'error': error_message if not success else None})
             except Exception as q_err:
                 logger.error(f"Failed to put end message on queue for {project_name}: {q_err}")
         # --- End Report End ---
@@ -482,19 +432,20 @@ def sync_directory(remote_dir_info, local_base_dir, config, progress_queue=None)
         # Example basic check (might need refinement):
         # if "lock file" in error_message.lower():
         #    result_data['error_type'] = 'lock_file'
-        #    result_data['path'] = remote_path # Assuming path needed for lock removal
+        #    result_data['path'] = local_path # Assuming path needed for lock removal
 
-    return (remote_path, result_data) # Return path and result dictionary
+    return (local_path, result_data) # Return path and result dictionary
 
 def perform_sync(progress_queue=None):
     """
     Main function to perform synchronization using rsync, potentially in parallel.
+    Syncs from local to remote (push).
 
     Args:
         progress_queue (multiprocessing.Queue, optional): Queue for sending progress updates.
 
     Returns:
-        dict: A dictionary mapping remote directory paths to their sync result data.
+        dict: A dictionary mapping local directory paths to their sync result data.
               Returns None if a configuration error or major exception occurs.
     """
     import shutil # Ensure shutil is imported for which()
@@ -519,7 +470,6 @@ def perform_sync(progress_queue=None):
 
         logger.info(f"Using rsync executable at: {rsync_path}")
 
-
         # Validate connection or mounted path based on mode
         if config['is_mounted']:
             if not os.path.exists(config['mounted_path']):
@@ -532,9 +482,11 @@ def perform_sync(progress_queue=None):
                  return None
 
         # Ensure local directory exists
-        os.makedirs(config['local_dir'], exist_ok=True)
-
-        # Find directories with .livework files
+        if not os.path.exists(config['local_dir']):
+            logger.error(f"Local directory does not exist: {config['local_dir']}")
+            return None
+        
+        # Find directories with .livework files in the local directory
         livework_dirs = find_livework_dirs(config)
 
         if not livework_dirs:
@@ -556,17 +508,17 @@ def perform_sync(progress_queue=None):
             # Pass necessary arguments using functools.partial, including the queue
             from functools import partial
             sync_func = partial(sync_directory,
-                                local_base_dir=config['local_dir'],
+                                remote_base_dir=config['remote_dir'],
                                 config=config,
                                 progress_queue=progress_queue) # Pass the progress_queue here
 
             # Execute tasks and gather results as they complete
             results_iterator = executor.map(sync_func, tasks)
 
-            for remote_path, result_data in results_iterator:
-                sync_results[remote_path] = result_data # Store the whole dict
+            for local_path, result_data in results_iterator:
+                sync_results[local_path] = result_data # Store the whole dict
                 status = "succeeded" if result_data['success'] else "failed"
-                logger.info(f"Sync task for {remote_path} {status}.")
+                logger.info(f"Sync task for {local_path} {status}.")
 
 
         successful_syncs = sum(1 for res in sync_results.values() if res['success'])
