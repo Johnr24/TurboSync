@@ -373,7 +373,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                 logger.error(f"Exception in sync thread target: {e}")
                 logger.exception("Traceback:")
                 overall_success = False
-                sync_message = f"Error during sync: {e}"
+                sync_message = f"Error during push: {e}"
                 rumps.notification("TurboSync Push Error", sync_message, "", sound=True)
                 # Optionally emit final failure signal
                 # self.sync_emitter.sync_progress_update.emit({
