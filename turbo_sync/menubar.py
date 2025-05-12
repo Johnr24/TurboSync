@@ -362,7 +362,7 @@ class TurboSyncMenuBar(rumps.App): # Reverted to rumps.App
                     # perform_sync returned None (config error or major exception)
                     logger.error("Push task failed with configuration or unexpected error.")
                     overall_success = False
-                    sync_message = "Sync failed due to error. Check logs."
+                    sync_message = "Push failed due to error. Check logs."
                     rumps.notification("TurboSync Push Failed", sync_message, "", sound=True)
                     # Optionally emit final failure signal
                     # self.sync_emitter.sync_progress_update.emit({
